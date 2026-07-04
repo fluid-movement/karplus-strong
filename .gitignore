@@ -1,0 +1,7 @@
+JUCE/
+build/
+build_tests/
+.DS_Store
+*.xcodeproj
+DerivedData/
+_deps/

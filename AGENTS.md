@@ -39,12 +39,15 @@ ctest --test-dir build -C Release --output-on-failure
 ```
 src/
 ├── PluginProcessor.h/cpp    — AudioProcessor + APVTS parameters + Synthesiser
-├── PluginEditor.h/cpp       — GUI (rotary sliders, combo boxes, labels)
+├── PluginEditor.h/cpp       — GUI (two-panel: Exciter / Delay Line GroupComponents)
 └── dsp/
-    ├── KarplusStrongDsp.h    — Pure KS algorithm (no JUCE dependency, testable)
+    ├── Exciter.h            — Excitation generation (noise/sine/dust) + pick model routing
+    ├── KsDelayLine.h        — KS delay buffer + lowpass + feedback + release ramp + silence detection
+    ├── KarplusStrongDsp.h   — Thin composition of Exciter + KsDelayLine (no JUCE dependency, testable)
     └── KarplusStrongVoice.h — SynthesiserVoice wrapper around KarplusStrongDsp
 tests/
-└── test_dsp.cpp             — Catch2 unit tests for KarplusStrongDsp
+├── test_dsp.cpp             — Catch2 unit tests for KarplusStrongDsp, Exciter, KsDelayLine
+└── test_integration.cpp     — Headless integration test (full AudioProcessor + MIDI)
 ```
 
 ## Architecture
@@ -55,25 +58,33 @@ tests/
   `processBlock()` checks for voice-count changes and updates all voice
   parameters each block.
 
+- **KarplusStrongDsp** is a thin facade composing **Exciter** (excitation
+  generation + pick model routing) and **KsDelayLine** (delay buffer +
+  first-order lowpass + feedback gain + release ramp + silence detection).
+  `noteOn()` computes delay length from frequency using the delay line's
+  sample rate, seeds the exciter burst, and initializes the delay line.
+  `processSample()` pulls excitation from the exciter (zero after burst),
+  feeds it to the delay line which falls back to feedback when excitation
+  is zero.
+
 - **KarplusStrongVoice** extends `juce::SynthesiserVoice`. On `startNote()`:
-  computes delay length from MIDI note frequency, resets excitation burst
-  counter, applies velocity modulation to brightness/decay, sets lowpass
-  cutoff. In `renderNextBlock()`: generates excitation (noise/sine/dust),
-  routes through pick model (off/comb/two-delay), processes the KS feedback
-  loop (delay → lowpass → gain → back into delay), outputs to stereo buffer.
+  calls `dsp.noteOn(freq, velocity)`. In `renderNextBlock()`: calls
+  `dsp.processSample()` per sample, writes to stereo buffer, breaks and
+  clears current note when `dsp.isSilent()`.
 
 - **PluginEditor** creates rotary sliders and combo boxes bound to APVTS
   parameters via `SliderAttachment` / `ComboBoxAttachment`. Dark background
-  (`0xff1a1a2e`), 5-column grid layout.
+  (`0xff1a1a2e`), two-panel layout with GroupComponents (Exciter left,
+  Delay Line right).
 
 ## Key JUCE APIs used
 
 | Purpose | JUCE class |
 |---|---|
 | Polyphony / voice allocation | `juce::Synthesiser` + `juce::SynthesiserVoice` |
-| Delay line | `juce::dsp::DelayLine<float>` |
-| Lowpass filter | `juce::dsp::FirstOrderTPTFilter<float>` |
-| Random noise | `juce::Random` |
+| Delay line | `std::vector<float>` circular buffer |
+| Lowpass filter | First-order RC (custom) |
+| Random noise | xorshift32 (custom) |
 | Parameter management | `juce::AudioProcessorValueTreeState` |
 | Parameter types | `AudioParameterFloat`, `AudioParameterChoice`, `AudioParameterInt` |
 | UI controls | `juce::Slider` (rotary), `juce::ComboBox`, `juce::Label` |
@@ -83,16 +94,16 @@ tests/
 
 | ID | Name | Type | Range |
 |---|---|---|---|
-| `decay` | Decay | Float | 0.50 – 0.999 |
-| `brightness` | Brightness | Float | 0 – 1 |
 | `excitation` | Excitation Type | Choice | Noise/Sine/Dust |
 | `excitation_length` | Excitation Length | Float | 1 – 1000 |
 | `pick_position` | Pick Position | Float | 0 – 0.5 |
 | `pick_model` | Pick Model | Choice | Off/Comb/Two-delay |
+| `decay` | Decay | Float | 0.50 – 0.999 |
+| `brightness` | Brightness | Float | 0 – 1 |
 | `vel_brightness` | Velocity->Brightness | Float | 0 – 1 |
 | `vel_decay` | Velocity->Decay | Float | 0 – 1 |
-| `voices` | Voices | Int | 1 – 16 |
 | `output_level` | Output Level | Float | 0 – 1 |
+| `voices` | Voices | Int | 1 – 16 |
 
 ## Conventions
 

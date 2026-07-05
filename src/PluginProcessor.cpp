@@ -5,12 +5,6 @@ KarplusStrongProcessor::KarplusStrongProcessor()
     : juce::AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "PARAMETERS",
           {
-              std::make_unique<juce::AudioParameterFloat>(
-                  juce::ParameterID { "decay", 1 }, "Decay",
-                  juce::NormalisableRange<float> (0.50f, 0.999f), 0.95f),
-              std::make_unique<juce::AudioParameterFloat>(
-                  juce::ParameterID { "brightness", 1 }, "Brightness",
-                  juce::NormalisableRange<float> (0.0f, 1.0f), 0.5f),
               std::make_unique<juce::AudioParameterChoice>(
                   juce::ParameterID { "excitation", 1 }, "Excitation Type",
                   juce::StringArray { "Noise", "Sine", "Dust" }, 0),
@@ -24,16 +18,22 @@ KarplusStrongProcessor::KarplusStrongProcessor()
                   juce::ParameterID { "pick_model", 1 }, "Pick Model",
                   juce::StringArray { "Off", "Comb", "Two-delay" }, 0),
               std::make_unique<juce::AudioParameterFloat>(
+                  juce::ParameterID { "decay", 1 }, "Decay",
+                  juce::NormalisableRange<float> (0.50f, 0.999f), 0.95f),
+              std::make_unique<juce::AudioParameterFloat>(
+                  juce::ParameterID { "brightness", 1 }, "Brightness",
+                  juce::NormalisableRange<float> (0.0f, 1.0f), 0.5f),
+              std::make_unique<juce::AudioParameterFloat>(
                   juce::ParameterID { "vel_brightness", 1 }, "Velocity->Brightness",
                   juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f),
               std::make_unique<juce::AudioParameterFloat>(
                   juce::ParameterID { "vel_decay", 1 }, "Velocity->Decay",
                   juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f),
-              std::make_unique<juce::AudioParameterInt>(
-                  juce::ParameterID { "voices", 1 }, "Voices", 1, 16, 8),
               std::make_unique<juce::AudioParameterFloat>(
                   juce::ParameterID { "output_level", 1 }, "Output Level",
                   juce::NormalisableRange<float> (0.0f, 1.0f), 0.8f),
+              std::make_unique<juce::AudioParameterInt>(
+                  juce::ParameterID { "voices", 1 }, "Voices", 1, 16, 8),
           })
 {
     synth.addSound (new KarplusStrongSound());

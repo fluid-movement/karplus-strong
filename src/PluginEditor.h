@@ -13,30 +13,37 @@ public:
     void resized() override;
 
 private:
-    using SliderAttachment  = juce::AudioProcessorValueTreeState::SliderAttachment;
-    using ComboBoxAttachment= juce::AudioProcessorValueTreeState::ComboBoxAttachment;
+    using SliderAttachment   = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
     KarplusStrongProcessor& processorRef;
 
-    juce::Slider decaySlider, brightnessSlider, excitationLengthSlider,
-                 pickPositionSlider, velBrightnessSlider, velDecaySlider,
-                 outputLevelSlider;
-
-    juce::ComboBox excitationCombo, pickModelCombo;
+    juce::GroupComponent exciterGroup;
+    juce::GroupComponent delayLineGroup;
 
     juce::Label titleLabel;
-    juce::Label decayLabel      { {}, "Decay" };
-    juce::Label brightnessLabel  { {}, "Brightness" };
+
+    juce::Slider excitationLengthSlider, pickPositionSlider;
+    juce::ComboBox excitationCombo, pickModelCombo;
+
+    juce::Slider decaySlider, brightnessSlider,
+                 velBrightnessSlider, velDecaySlider,
+                 outputLevelSlider;
+
     juce::Label excitationLabel  { {}, "Excitation" };
     juce::Label excLengthLabel   { {}, "Exc Length" };
     juce::Label pickPosLabel      { {}, "Pick Pos" };
     juce::Label pickModelLabel    { {}, "Pick Model" };
+
+    juce::Label decayLabel       { {}, "Decay" };
+    juce::Label brightnessLabel   { {}, "Brightness" };
     juce::Label velBrightLabel    { {}, "Vel->Bright" };
     juce::Label velDecayLabel     { {}, "Vel->Decay" };
     juce::Label outputLabel       { {}, "Output" };
 
-    std::unique_ptr<SliderAttachment>   decayAttach, brightnessAttach, excLengthAttach,
-                                        pickPosAttach, velBrightAttach, velDecayAttach,
+    std::unique_ptr<SliderAttachment>   excLengthAttach, pickPosAttach,
+                                        decayAttach, brightnessAttach,
+                                        velBrightAttach, velDecayAttach,
                                         outputAttach;
     std::unique_ptr<ComboBoxAttachment> excitationAttach, pickModelAttach;
 

@@ -72,3 +72,27 @@ target_link_libraries(KarplusStrongTests PRIVATE
 
 include(CTest)
 add_test(NAME KarplusStrongTests COMMAND KarplusStrongTests)
+
+# ----------------------------------------------------------------------
+# Integration test (exercises full AudioProcessor with MIDI)
+# ----------------------------------------------------------------------
+add_executable(IntegrationTest
+    tests/test_integration.cpp
+)
+
+target_sources(IntegrationTest PRIVATE
+    src/PluginProcessor.cpp
+    src/PluginEditor.cpp
+)
+
+target_include_directories(IntegrationTest PRIVATE
+    src
+    src/dsp
+)
+
+target_link_libraries(IntegrationTest PRIVATE
+    juce::juce_audio_utils
+    juce::juce_dsp
+)
+
+add_test(NAME IntegrationTest COMMAND IntegrationTest)

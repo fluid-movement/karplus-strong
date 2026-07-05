@@ -41,7 +41,7 @@ public:
 
 private:
     juce::Synthesiser synth;
-    int currentNumVoices = 8;
+    int currentNumVoices = 0;
 
     void updateVoiceParameters();
     void updateNumVoices (int newNumVoices);

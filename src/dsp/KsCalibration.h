@@ -27,6 +27,8 @@ namespace ks
     constexpr float humanizeMaxBrightness  = 0.1f;
     constexpr float humanizeMaxPickJitter  = 0.05f;
 
+    constexpr float exciterFilterDeadzone = 0.01f;
+
     inline float computeCutoffHz (float brightness)
     {
         return minCutoffHz + std::clamp (brightness, 0.0f, 1.0f) * cutoffRangeHz;

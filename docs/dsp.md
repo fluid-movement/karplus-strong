@@ -114,13 +114,27 @@ pick-model routing.
 
 ### Exciter tone filter
 
-`exciterTone` (0–1, default 1 = bypass) shapes the burst's brightness before
-the pick model, independent of the string's `brightness` control — soft
-fingertip (low tone) vs. hard plectrum (high tone). At `exciterTone >= 0.999`
-the filter is skipped entirely (`toneFilterActive = false`) so the default
-sound is bit-identical to no filter. Below that, `noteOn` sets the filter's
-cutoff to `ks::computeCutoffHz(exciterTone)` (same mapping as `brightness`)
-and resets it, so it starts clean each note.
+`exciterTone` (−1 to 1, default 0 = clean) is a bipolar tone knob shaping the
+burst's brightness before the pick model, independent of the string's
+`brightness` control: center is unfiltered, turning it left engages a
+lowpass (soft fingertip), turning it right engages a highpass (hard
+plectrum). At `|exciterTone| <= ks::exciterFilterDeadzone` (0.01) the filter
+is skipped entirely (`toneFilterActive = false`), so the default is
+bit-identical to no filter.
+
+Away from center, `noteOn` sets `toneFilterIsHighpass = exciterTone > 0` and
+picks the cutoff from the same `ks::computeCutoffHz` mapping used by
+`brightness`:
+- left half: `computeCutoffHz(1 + exciterTone)` — cutoff falls from ~12 kHz
+  near center to `ks::minCutoffHz` (200 Hz) at full left (heavier lowpass).
+- right half: `computeCutoffHz(exciterTone)` — cutoff rises from ~200 Hz near
+  center to ~12 kHz at full right (heavier highpass).
+
+There's only one one-pole filter (`toneFilter`, a `OnePoleLowpass`). The
+highpass side doesn't need a second filter class: it reuses the same lowpass
+and takes the complementary output, `excitation - toneFilter.process
+(excitation)` — the standard one-pole "leaky differentiator" highpass, which
+shares its −3 dB point exactly with the lowpass at the same cutoff.
 
 ### Velocity → excitation length
 

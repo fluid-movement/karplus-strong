@@ -7,7 +7,7 @@ struct KsParams
     float pickPosition       = 0.2f;
     int   pickModel          = 0;
     int   sineHarmonic       = 1;
-    float exciterTone        = 1.0f;
+    float exciterTone        = 0.0f;
     float velExcitationLength = 0.0f;
     float decayTime          = 4.0f;
     float keyTrack           = 0.0f;

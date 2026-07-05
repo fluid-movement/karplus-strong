@@ -664,35 +664,75 @@ TEST_CASE("Sine harmonic control changes the exciter's tracked pitch", "[exciter
     REQUIRE (anyDifferent);
 }
 
-TEST_CASE("Exciter tone filter darkens the burst relative to bypass", "[exciter]")
+TEST_CASE("Exciter tone knob is bypassed dead-center", "[exciter]")
 {
-    auto params = makeParams (0.3f, 0.5f, 0, 300.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
-
-    Exciter bright;
-    bright.prepare (44100.0);
-    params.exciterTone = 1.0f;
-    bright.setParameters (params);
-    bright.noteOn (200.0f, 440.0f, 1.0f);
-
-    Exciter dark;
-    dark.prepare (44100.0);
+    auto params = makeParams (0.3f, 0.5f, 1, 300.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
     params.exciterTone = 0.0f;
-    dark.setParameters (params);
-    dark.noteOn (200.0f, 440.0f, 1.0f);
 
-    float brightRoughness = 0.0f, darkRoughness = 0.0f;
-    float prevBright = 0.0f, prevDark = 0.0f;
+    Exciter exc;
+    exc.prepare (44100.0);
+    exc.setParameters (params);
+    exc.noteOn (200.0f, 440.0f, 1.0f);
+
+    double phase = 0.0;
+    for (int i = 0; i < 50; ++i)
+    {
+        phase += 2.0 * ks::pi * 440.0 / 44100.0;
+        if (phase > 2.0 * ks::pi)
+            phase -= 2.0 * ks::pi;
+        float expected = static_cast<float> (std::sin (phase));
+        REQUIRE (std::abs (exc.processSample() - expected) < 1e-5f);
+    }
+}
+
+TEST_CASE("Exciter tone knob lowpasses when turned left of center", "[exciter]")
+{
+    auto params = makeParams (0.3f, 0.5f, 1, 300.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+
+    Exciter clean;
+    clean.prepare (44100.0);
+    clean.setParameters (params);
+    clean.noteOn (200.0f, 8000.0f, 1.0f);
+
+    params.exciterTone = -1.0f;
+    Exciter filtered;
+    filtered.prepare (44100.0);
+    filtered.setParameters (params);
+    filtered.noteOn (200.0f, 8000.0f, 1.0f);
+
+    float cleanPeak = 0.0f, filteredPeak = 0.0f;
     for (int i = 0; i < 300; ++i)
     {
-        float b = bright.processSample();
-        float d = dark.processSample();
-        brightRoughness += std::abs (b - prevBright);
-        darkRoughness += std::abs (d - prevDark);
-        prevBright = b;
-        prevDark = d;
+        cleanPeak = std::max (cleanPeak, std::abs (clean.processSample()));
+        filteredPeak = std::max (filteredPeak, std::abs (filtered.processSample()));
     }
 
-    REQUIRE (darkRoughness < brightRoughness);
+    REQUIRE (filteredPeak < cleanPeak * 0.5f);
+}
+
+TEST_CASE("Exciter tone knob highpasses when turned right of center", "[exciter]")
+{
+    auto params = makeParams (0.3f, 0.5f, 1, 300.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+
+    Exciter clean;
+    clean.prepare (44100.0);
+    clean.setParameters (params);
+    clean.noteOn (200.0f, 100.0f, 1.0f);
+
+    params.exciterTone = 1.0f;
+    Exciter filtered;
+    filtered.prepare (44100.0);
+    filtered.setParameters (params);
+    filtered.noteOn (200.0f, 100.0f, 1.0f);
+
+    float cleanPeak = 0.0f, filteredPeak = 0.0f;
+    for (int i = 0; i < 2000; ++i)
+    {
+        cleanPeak = std::max (cleanPeak, std::abs (clean.processSample()));
+        filteredPeak = std::max (filteredPeak, std::abs (filtered.processSample()));
+    }
+
+    REQUIRE (filteredPeak < cleanPeak * 0.5f);
 }
 
 TEST_CASE("Velocity modulates excitation length", "[exciter]")

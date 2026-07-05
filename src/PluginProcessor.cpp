@@ -21,7 +21,7 @@ KarplusStrongProcessor::KarplusStrongProcessor()
                   juce::ParameterID { "sine_harmonic", 1 }, "Sine Harmonic", 1, 8, 1),
               std::make_unique<juce::AudioParameterFloat>(
                   juce::ParameterID { "exciter_tone", 1 }, "Exciter Tone",
-                  juce::NormalisableRange<float> (0.0f, 1.0f), 1.0f),
+                  juce::NormalisableRange<float> (-1.0f, 1.0f), 0.0f),
               std::make_unique<juce::AudioParameterFloat>(
                   juce::ParameterID { "vel_excitation_length", 1 }, "Velocity->Length",
                   juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f),

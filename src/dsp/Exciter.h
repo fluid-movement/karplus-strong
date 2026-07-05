@@ -37,7 +37,7 @@ public:
         pickPosition        = newParams.pickPosition;
         pickModel           = newParams.pickModel;
         sineHarmonic        = std::max (newParams.sineHarmonic, 1);
-        exciterTone         = std::clamp (newParams.exciterTone, 0.0f, 1.0f);
+        exciterTone         = std::clamp (newParams.exciterTone, -1.0f, 1.0f);
         velExcitationLength = newParams.velExcitationLength;
         humanize            = std::clamp (newParams.humanize, 0.0f, 1.0f);
     }
@@ -60,9 +60,15 @@ public:
         noteExcitationLength = std::clamp (modLength, 1.0f, 1000.0f);
         burstRemaining = static_cast<int> (noteExcitationLength);
 
-        toneFilterActive = exciterTone < 0.999f;
+        toneFilterActive = std::abs (exciterTone) > ks::exciterFilterDeadzone;
         if (toneFilterActive)
-            toneFilter.setCutoff (ks::computeCutoffHz (exciterTone), static_cast<float> (sampleRate));
+        {
+            toneFilterIsHighpass = exciterTone > 0.0f;
+            float cutoffHz = toneFilterIsHighpass
+                ? ks::computeCutoffHz (exciterTone)
+                : ks::computeCutoffHz (1.0f + exciterTone);
+            toneFilter.setCutoff (cutoffHz, static_cast<float> (sampleRate));
+        }
     }
 
     bool isActive() const { return burstRemaining > 0; }
@@ -76,7 +82,10 @@ public:
 
         float excitation = generateExcitation();
         if (toneFilterActive)
-            excitation = toneFilter.process (excitation);
+        {
+            float lowpassed = toneFilter.process (excitation);
+            excitation = toneFilterIsHighpass ? (excitation - lowpassed) : lowpassed;
+        }
         --burstRemaining;
 
         switch (pickModel)
@@ -161,8 +170,9 @@ private:
     float pickPositionForNote = 0.2f;
     int   pickModel = 0;
     int   sineHarmonic = 1;
-    float exciterTone = 1.0f;
+    float exciterTone = 0.0f;
     bool  toneFilterActive = false;
+    bool  toneFilterIsHighpass = false;
     float velExcitationLength = 0.0f;
     float humanize = 0.0f;
 

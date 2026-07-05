@@ -17,7 +17,7 @@ are cached once in the constructor (`:46-56`); each block
 | `pick_position` | Pick Position | Float | 0 – 0.5 | 0.2 | `:15` | `Exciter::pickPosition` |
 | `pick_model` | Pick Model | Choice | Off/Comb/Two-delay | Off (0) | `:18` | `Exciter::pickModel` |
 | `sine_harmonic` | Sine Harmonic | Int | 1 – 8 | 1 | `:20-21` | `Exciter::sineHarmonic` — multiplies the tracked note frequency for the Sine excitation type |
-| `exciter_tone` | Exciter Tone | Float | 0 – 1 | 1.0 (bypass) | `:22-24` | `Exciter::exciterTone` → burst lowpass cutoff (same mapping as `brightness`); filter is skipped entirely at 1.0 |
+| `exciter_tone` | Exciter Tone | Float | -1 – 1 | 0.0 (clean) | `:22-24` | `Exciter::exciterTone` — bipolar: center clean, left lowpasses, right highpasses the burst (cutoff from `ks::computeCutoffHz`, same mapping as `brightness`); filter is skipped entirely within `ks::exciterFilterDeadzone` of center |
 | `vel_excitation_length` | Velocity->Length | Float | 0 – 1 | 0 | `:25-27` | `Exciter::velExcitationLength` → modulates the note's burst length |
 | `decay_time` | Decay Time | Float | 0.5 – 40 s (skew centre 8 s) | 4.0 | `:28-34` | `KsDelayLine::decayTime` → time-to-quiet in seconds |
 | `key_track` | Key Track | Float | 0.0 – 1.0 | 0.0 | `:35-37` | `KsDelayLine::keyTrack` → compensation across keyboard |
@@ -87,7 +87,7 @@ second arg to the param constructor — no state break.
 | excitation_length | 100 | short noise burst |
 | pick_position | 0.2 | near the bridge |
 | sine_harmonic | 1 | fundamental by default |
-| exciter_tone | 1.0 | bypass — filter fully off, identical to pre-feature sound |
+| exciter_tone | 0.0 | dead-center — filter fully off, identical to pre-feature sound |
 | vel_excitation_length | 0 | no length modulation by default |
 | drive | 0 | bypass — `applySaturation` is a no-op at 0 |
 | damp_mode | Ring (0) | preserves the original "rings out per decay" design |

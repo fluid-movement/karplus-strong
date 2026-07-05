@@ -19,9 +19,10 @@ All controls are built by `addControl(group, paramId, labelText)`
 - Each `Control` owns its label, its slider-or-combo, and its attachment.
   The attachment members are declared after the component members, so they
   destruct first — the required order.
-- Layout order **is** declaration order: `layoutGroup` (`:93`) places a
-  group's controls left-to-right in the order of the `addControl` calls in
-  the constructor (`:23-34`).
+- Layout order **is** declaration order: `layoutGroup` places a group's
+  controls left-to-right in the order of the `addControl` calls in the
+  constructor, wrapping to a new row whenever the next control would overflow
+  the group's inner width.
 
 ## To add a control
 
@@ -31,20 +32,22 @@ One line in the constructor:
 addControl (Group::delayLine, "my_param", "My Param");
 ```
 
-If the panel overflows, reduce that group's column width in `resized()`
-(`:89-90`) or widen the window (`:36`). Formula:
-`N * (columnWidth + ctrlGap) - ctrlGap` must fit in `panelWidth - 24`
-(the `reduced(12, 20)` padding).
+`layoutGroup` wraps automatically to a new row once a group's controls no
+longer fit on one line, so adding controls doesn't require manually
+rebalancing column counts — it only needs enough window height for the extra
+row(s). If a group grows tall enough to clip, increase `setSize` (`:36`).
 
 ## Window & layout
 
-- Size: **800 × 340** — `src/PluginEditor.cpp:36`.
-- Background: `0xff1a1a2e` — `:71`.
+- Size: **800 × 420** — `src/PluginEditor.cpp:36`.
+- Background: `0xff1a1a2e`.
 - Title: "Karplus-Strong", centered, 18pt bold, top 30 px.
 - Two `GroupComponent` panels: **Exciter** (left, width 320, column width 70)
-  and **Delay Line** (right, remaining width, column width 58).
-- Geometry constants in `layoutGroup` (`:95-97`): `lblH` 16, `ctrlH` 84,
-  `ctrlGap` 4.
+  and **Delay Line** (right, remaining width, column width 58). Each wraps
+  into multiple rows now that they hold more than one row's worth of
+  controls.
+- Geometry constants in `layoutGroup`: `lblH` 16, `ctrlH` 84, `ctrlGap` 4,
+  `rowGap` 4.
 
 ## Current controls
 
@@ -54,6 +57,9 @@ If the panel overflows, reduce that group's column width in `resized()`
 | Exciter | `excitation_length` | Exc Length | rotary |
 | Exciter | `pick_position` | Pick Pos | rotary |
 | Exciter | `pick_model` | Pick Model | ComboBox (from choices) |
+| Exciter | `sine_harmonic` | Sine Harm | rotary |
+| Exciter | `exciter_tone` | Exc Tone | rotary |
+| Exciter | `vel_excitation_length` | Vel->Length | rotary |
 | Delay Line | `decay_time` | Decay Time | rotary |
 | Delay Line | `brightness` | Brightness | rotary |
 | Delay Line | `vel_brightness` | Vel->Bright | rotary |
@@ -61,6 +67,11 @@ If the panel overflows, reduce that group's column width in `resized()`
 | Delay Line | `output_level` | Output | rotary |
 | Delay Line | `voices` | Voices | rotary |
 | Delay Line | `key_track` | Key Track | rotary |
+| Delay Line | `drive` | Drive | rotary |
+| Delay Line | `damp_mode` | Damp Mode | ComboBox (from choices) |
+| Delay Line | `release_time` | Release | rotary |
+| Delay Line | `humanize` | Humanize | rotary |
+| Delay Line | `stereo_spread` | Stereo | rotary |
 
 ## Styling
 

@@ -81,14 +81,14 @@ the tail (see `gotchas.md` trap #5). A hard stop (`allowTailOff == false`,
 from voice stealing or all-notes-off) resets the DSP and frees the slot
 immediately.
 
-`KsDelayLine::noteOff` — `src/dsp/KsDelayLine.h:56`:
-```cpp
-void noteOff (bool /*allowTailOff*/) {}   // intentionally empty
-```
-
-`noteOff` is kept as a no-op for future exciters that may need release logic
-(e.g. a bowed-string model). **Do not add release-ramp logic back here** —
-see `gotchas.md` for why it was removed.
+`KsDelayLine::noteOff` — `src/dsp/KsDelayLine.h:56` is a no-op **in Ring mode**
+(`dampMode == 0`, the default) — unchanged from the original design. In Damp
+mode (`dampMode == 1`), a soft release (`allowTailOff == true`) now arms a
+release-gain envelope so the string fades over `releaseTime` seconds instead
+of ringing indefinitely. **Do not add unconditional release-ramp logic here**
+— any new release behavior must stay gated behind an explicit mode, matching
+the Damp-mode pattern; see `gotchas.md` for the history of why the old
+always-on release ramp was removed.
 
 ## Render path
 
@@ -96,14 +96,19 @@ see `gotchas.md` for why it was removed.
 ```
 for each sample in block:
     out = dsp.processSample()
-    add out to channel 0 and channel 1   (mono→stereo copy)
+    add out * leftGain to channel 0, out * rightGain to channel 1
     if dsp.isSilent():
         clearCurrentNote()
         break
 ```
 
-Output is added (not copied) — `addSample` — so polyphonic voices sum in the
-buffer before `processBlock` returns.
+`leftGain`/`rightGain` come from the voice's `pan` (`-1..1`, set by
+`PluginProcessor::updateVoicePans()` from the `stereo_spread` param): linear
+pan law where `pan == 0` gives `leftGain == rightGain == 1.0` (the original
+always-mono-copy behavior, still the default since `stereo_spread` defaults
+to 0), `pan == -1` gives `(1, 0)`, `pan == 1` gives `(0, 1)`. Output is added
+(not copied) — `addSample` — so polyphonic voices sum in the buffer before
+`processBlock` returns.
 
 ## isSilent trigger
 

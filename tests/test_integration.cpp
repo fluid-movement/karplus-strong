@@ -85,6 +85,57 @@ TEST_CASE ("Released note's tail survives the next noteOn", "[integration]")
     REQUIRE (tailAfter > tailBefore * 0.3f);
 }
 
+TEST_CASE ("Stereo spread pans voices across the field", "[integration]")
+{
+    KarplusStrongProcessor processor;
+    processor.prepareToPlay (44100.0, 512);
+    juce::AudioBuffer<float> buffer (2, 512);
+
+    auto* spreadParam = processor.apvts.getParameter ("stereo_spread");
+    spreadParam->setValueNotifyingHost (spreadParam->convertTo0to1 (1.0f));
+
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (1, 40, 1.0f), 0);
+    midi.addEvent (juce::MidiMessage::noteOn (1, 41, 1.0f), 0);
+    buffer.clear();
+    processor.processBlock (buffer, midi);
+
+    renderBlocks (processor, buffer, 5);
+
+    float leftSum = 0.0f, rightSum = 0.0f;
+    for (int s = 0; s < buffer.getNumSamples(); ++s)
+    {
+        leftSum += std::abs (buffer.getSample (0, s));
+        rightSum += std::abs (buffer.getSample (1, s));
+    }
+
+    REQUIRE (std::abs (leftSum - rightSum) > 1e-6f);
+}
+
+TEST_CASE ("Damp mode releases the voice faster than Ring mode", "[integration]")
+{
+    auto setChoice = [] (KarplusStrongProcessor& p, const char* id, int value)
+    {
+        auto* param = p.apvts.getParameter (id);
+        param->setValueNotifyingHost (param->convertTo0to1 (static_cast<float> (value)));
+    };
+
+    KarplusStrongProcessor damped;
+    damped.prepareToPlay (44100.0, 512);
+    juce::AudioBuffer<float> dampedBuffer (2, 512);
+    setChoice (damped, "damp_mode", 1);
+    auto* releaseParam = damped.apvts.getParameter ("release_time");
+    releaseParam->setValueNotifyingHost (releaseParam->convertTo0to1 (0.05f));
+
+    sendMidi (damped, dampedBuffer, juce::MidiMessage::noteOn (1, 60, 0.8f));
+    renderBlocks (damped, dampedBuffer, 5);
+    sendMidi (damped, dampedBuffer, juce::MidiMessage::noteOff (1, 60));
+    renderBlocks (damped, dampedBuffer, 40);
+
+    float dampedTail = blockMax (dampedBuffer);
+    REQUIRE (dampedTail < 1e-3f);
+}
+
 TEST_CASE ("With a single voice, the next note steals the ringing tail", "[integration]")
 {
     KarplusStrongProcessor processor;

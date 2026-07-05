@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <juce_audio_basics/juce_audio_basics.h>
 #include "KarplusStrongDsp.h"
 #include "KsParams.h"
@@ -26,6 +27,8 @@ public:
 
     void setEnabled (bool shouldBeEnabled) { enabled = shouldBeEnabled; }
 
+    void setPan (float newPan) { pan = std::clamp (newPan, -1.0f, 1.0f); }
+
     bool canPlaySound (juce::SynthesiserSound*) override { return enabled; }
 
     void startNote (int midiNoteNumber, float velocity,
@@ -48,11 +51,14 @@ public:
 
     void renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSample, int numSamples) override
     {
+        float leftGain  = 1.0f - std::max (0.0f, pan);
+        float rightGain = 1.0f + std::min (0.0f, pan);
+
         for (int smp = 0; smp < numSamples; ++smp)
         {
             float out = dsp.processSample();
-            outputBuffer.addSample (0, startSample + smp, out);
-            outputBuffer.addSample (1, startSample + smp, out);
+            outputBuffer.addSample (0, startSample + smp, out * leftGain);
+            outputBuffer.addSample (1, startSample + smp, out * rightGain);
 
             if (dsp.isSilent())
             {
@@ -69,4 +75,5 @@ public:
 
 private:
     bool enabled = true;
+    float pan = 0.0f;
 };

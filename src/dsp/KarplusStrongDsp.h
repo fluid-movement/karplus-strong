@@ -1,7 +1,10 @@
 #pragma once
 
+#include <algorithm>
+#include <cstdint>
 #include "Exciter.h"
 #include "KsDelayLine.h"
+#include "KsCalibration.h"
 #include "KsParams.h"
 
 class KarplusStrongDsp
@@ -21,15 +24,23 @@ public:
 
     void setParameters (const KsParams& params)
     {
+        humanize = std::clamp (params.humanize, 0.0f, 1.0f);
         delayLine.setParameters (params);
         exciter.setParameters (params);
     }
 
     void noteOn (float frequency, float velocity)
     {
-        float delaySamp = static_cast<float> (delayLine.getSampleRate()) / frequency;
-        exciter.noteOn (delaySamp);
-        delayLine.noteOn (frequency, velocity, exciter.getExcitationLength());
+        float noteFrequency = frequency;
+        if (humanize > 0.0f)
+        {
+            float jitter = (nextRandom() * 2.0f - 1.0f) * humanize * ks::humanizeMaxDetune;
+            noteFrequency = frequency * (1.0f + jitter);
+        }
+
+        float delaySamp = static_cast<float> (delayLine.getSampleRate()) / noteFrequency;
+        exciter.noteOn (delaySamp, noteFrequency, velocity);
+        delayLine.noteOn (noteFrequency, velocity, exciter.getExcitationLength());
     }
 
     void noteOff (bool allowTailOff)
@@ -50,4 +61,18 @@ public:
 
     Exciter exciter;
     KsDelayLine delayLine;
+
+private:
+    float nextRandom()
+    {
+        uint32_t r = rngState;
+        r ^= r << 13;
+        r ^= r >> 17;
+        r ^= r << 5;
+        rngState = r;
+        return static_cast<float> (r) / static_cast<float> (0xFFFFFFFFu);
+    }
+
+    float humanize = 0.0f;
+    uint32_t rngState = 987654321u;
 };

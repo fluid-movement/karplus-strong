@@ -126,14 +126,19 @@ design decisions that must not regress. Each entry: Symptom → Root cause
 
 ## Design decisions (do not regress)
 
-### noteOff is a no-op
+### noteOff is a no-op in Ring mode — extended (not replaced) for Damp mode
 
 Already covered in trap #2. `KsDelayLine::noteOff` (`src/dsp/KsDelayLine.h:56`)
-and `KarplusStrongDsp::noteOff` (`src/dsp/KarplusStrongDsp.h:35`) are empty.
-The string rings out per `decay`. Future exciters needing release behavior
-(e.g. a damp/palm-mute mode) are expected to extend these — flag this in the
-commit if you do. The old `releaseGain` dead-code field was deleted in the
-2026-07 refactor; reintroduce release state fresh with the feature.
+is still an unconditional no-op when `params.dampMode == 0` (Ring, the
+default) — the string rings out per `decay` exactly as before, and the
+"noteOff is a no-op" unit test still exercises that path directly. The 2026-07
+feature pass added `dampMode == 1` (Damp) as the flagged extension this
+section anticipated: on a soft release (`allowTailOff == true`) it arms a
+fresh `releaseGain`/`releaseCoeff` envelope (`ks::computeReleaseCoeff`) that
+decays the feedback-loop input and the output over `releaseTime` seconds. This
+is new state, not a revival of the old deleted `releaseGain` field, and it
+never touches the Ring-mode path. Do not add unconditional release-ramp logic
+to `noteOff` — it must stay gated behind `dampMode == 1`.
 
 ### The DSP layer has no JUCE dependency
 

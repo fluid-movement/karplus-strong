@@ -90,6 +90,12 @@ target_include_directories(IntegrationTest PRIVATE
     src/dsp
 )
 
+target_compile_definitions(IntegrationTest
+    PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+)
+
 target_link_libraries(IntegrationTest PRIVATE
     Catch2::Catch2WithMain
     juce::juce_audio_utils

@@ -45,20 +45,29 @@ private:
     juce::Synthesiser synth;
     int currentNumVoices = 0;
 
-    std::atomic<float>* excitationParam       = nullptr;
-    std::atomic<float>* excitationLengthParam = nullptr;
-    std::atomic<float>* pickPositionParam     = nullptr;
-    std::atomic<float>* pickModelParam        = nullptr;
-    std::atomic<float>* decayTimeParam        = nullptr;
-    std::atomic<float>* keyTrackParam         = nullptr;
-    std::atomic<float>* brightnessParam       = nullptr;
-    std::atomic<float>* velBrightnessParam    = nullptr;
-    std::atomic<float>* velDecayParam         = nullptr;
-    std::atomic<float>* outputLevelParam      = nullptr;
-    std::atomic<float>* voicesParam           = nullptr;
+    std::atomic<float>* excitationParam         = nullptr;
+    std::atomic<float>* excitationLengthParam   = nullptr;
+    std::atomic<float>* pickPositionParam       = nullptr;
+    std::atomic<float>* pickModelParam          = nullptr;
+    std::atomic<float>* sineHarmonicParam       = nullptr;
+    std::atomic<float>* exciterToneParam        = nullptr;
+    std::atomic<float>* velExcitationLengthParam = nullptr;
+    std::atomic<float>* decayTimeParam          = nullptr;
+    std::atomic<float>* keyTrackParam           = nullptr;
+    std::atomic<float>* brightnessParam         = nullptr;
+    std::atomic<float>* velBrightnessParam      = nullptr;
+    std::atomic<float>* velDecayParam           = nullptr;
+    std::atomic<float>* driveParam              = nullptr;
+    std::atomic<float>* dampModeParam           = nullptr;
+    std::atomic<float>* releaseTimeParam        = nullptr;
+    std::atomic<float>* humanizeParam           = nullptr;
+    std::atomic<float>* outputLevelParam        = nullptr;
+    std::atomic<float>* voicesParam             = nullptr;
+    std::atomic<float>* stereoSpreadParam       = nullptr;
 
     void updateVoiceParameters();
     void updateNumVoices (int newNumVoices);
+    void updateVoicePans();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KarplusStrongProcessor)
 };

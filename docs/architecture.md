@@ -40,16 +40,19 @@ chain) and `KsCalibration.h` (constants + pure tuning functions). See
 
 1. Host calls `processBlock(buffer, midi)` — `src/PluginProcessor.cpp:75`
 2. `buffer.clear()`, then `updateNumVoices` (enabled-flag toggle only, no
-   allocation) — `:77-79`
+   allocation)
 3. `updateVoiceParameters()` builds one `KsParams` from the cached atomics and
-   pushes it to every voice — `:84`
-4. `synth.renderNextBlock(buffer, midi, 0, N)` — `:81`
+   pushes it to every voice; `updateVoicePans()` computes each voice's
+   `stereo_spread`-derived pan the same way
+4. `synth.renderNextBlock(buffer, midi, 0, N)`
 5. Synthesiser splits block at MIDI event positions, calls `noteOn`/`noteOff`
    (JUCE internals — see `voice-and-synth.md` for our hooks)
 6. For each sub-block, `renderVoices()` calls each voice's `renderNextBlock`
 7. Each `KarplusStrongVoice::renderNextBlock` pulls `dsp.processSample()` per
-   sample and adds to both stereo channels — `src/dsp/KarplusStrongVoice.h:49`
-8. Voice calls `clearCurrentNote()` + breaks when `dsp.isSilent()` — `:59-63`
+   sample and adds it to both channels scaled by that voice's pan gains
+   (`src/dsp/KarplusStrongVoice.h`) — at the default `stereo_spread == 0` both
+   gains are `1.0`, identical to the original mono-copy behavior
+8. Voice calls `clearCurrentNote()` + breaks when `dsp.isSilent()`
 
 ## Parameter → DSP binding
 

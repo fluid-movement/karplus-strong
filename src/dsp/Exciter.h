@@ -6,6 +6,7 @@
 #include "CircularBuffer.h"
 #include "KsCalibration.h"
 #include "KsParams.h"
+#include "OnePoleLowpass.h"
 
 class Exciter
 {
@@ -26,26 +27,47 @@ public:
         delay3Buffer.clear();
         phase = 0.0;
         burstRemaining = 0;
+        toneFilter.reset();
     }
 
     void setParameters (const KsParams& newParams)
     {
-        excitationType   = newParams.excitationType;
-        excitationLength = std::clamp (newParams.excitationLength, 1.0f, 1000.0f);
-        pickPosition     = newParams.pickPosition;
-        pickModel        = newParams.pickModel;
+        excitationType      = newParams.excitationType;
+        excitationLength    = std::clamp (newParams.excitationLength, 1.0f, 1000.0f);
+        pickPosition        = newParams.pickPosition;
+        pickModel           = newParams.pickModel;
+        sineHarmonic        = std::max (newParams.sineHarmonic, 1);
+        exciterTone         = std::clamp (newParams.exciterTone, 0.0f, 1.0f);
+        velExcitationLength = newParams.velExcitationLength;
+        humanize            = std::clamp (newParams.humanize, 0.0f, 1.0f);
     }
 
-    void noteOn (float delaySamples_)
+    void noteOn (float delaySamples_, float frequency_, float velocity_)
     {
         delaySamples = delaySamples_;
+        frequency = frequency_;
         reset();
-        burstRemaining = static_cast<int> (excitationLength);
+
+        float notePickPosition = pickPosition;
+        if (humanize > 0.0f)
+        {
+            float jitter = (nextRandom() * 2.0f - 1.0f) * humanize * ks::humanizeMaxPickJitter;
+            notePickPosition = std::clamp (pickPosition + jitter, 0.0f, 0.5f);
+        }
+        pickPositionForNote = notePickPosition;
+
+        float modLength = excitationLength * (1.0f + velExcitationLength * (velocity_ - 0.5f));
+        noteExcitationLength = std::clamp (modLength, 1.0f, 1000.0f);
+        burstRemaining = static_cast<int> (noteExcitationLength);
+
+        toneFilterActive = exciterTone < 0.999f;
+        if (toneFilterActive)
+            toneFilter.setCutoff (ks::computeCutoffHz (exciterTone), static_cast<float> (sampleRate));
     }
 
     bool isActive() const { return burstRemaining > 0; }
 
-    float getExcitationLength() const { return excitationLength; }
+    float getExcitationLength() const { return noteExcitationLength; }
 
     float processSample()
     {
@@ -53,6 +75,8 @@ public:
             return 0.0f;
 
         float excitation = generateExcitation();
+        if (toneFilterActive)
+            excitation = toneFilter.process (excitation);
         --burstRemaining;
 
         switch (pickModel)
@@ -62,7 +86,7 @@ public:
 
             case 1:
             {
-                float pd = pickPosition * delaySamples;
+                float pd = pickPositionForNote * delaySamples;
                 float out = preDelayBuffer.readDelayed (pd);
                 preDelayBuffer.write (excitation);
                 return out;
@@ -70,7 +94,7 @@ public:
 
             case 2:
             {
-                float pos2 = pickPosition * delaySamples;
+                float pos2 = pickPositionForNote * delaySamples;
                 float d2 = delaySamples + pos2;
                 float d3 = std::max (1.0f, delaySamples - pos2);
                 float out = 0.5f * (delay2Buffer.readDelayed (d2)
@@ -95,7 +119,7 @@ private:
 
             case 1:
             {
-                phase += 2.0 * ks::pi * 440.0 / sampleRate;
+                phase += 2.0 * ks::pi * static_cast<double> (frequency) * sineHarmonic / sampleRate;
                 if (phase > 2.0 * ks::pi)
                     phase -= 2.0 * ks::pi;
                 return static_cast<float> (std::sin (phase));
@@ -126,15 +150,24 @@ private:
 
     double sampleRate = 44100.0;
     float  delaySamples = 100.0f;
+    float  frequency = 440.0f;
     int    burstRemaining = 0;
     double phase = 0.0;
 
     int   excitationType = 0;
     float excitationLength = 100.0f;
+    float noteExcitationLength = 100.0f;
     float pickPosition = 0.2f;
+    float pickPositionForNote = 0.2f;
     int   pickModel = 0;
+    int   sineHarmonic = 1;
+    float exciterTone = 1.0f;
+    bool  toneFilterActive = false;
+    float velExcitationLength = 0.0f;
+    float humanize = 0.0f;
 
     uint32_t rngState = 123456789u;
 
+    OnePoleLowpass toneFilter;
     CircularBuffer preDelayBuffer, delay2Buffer, delay3Buffer;
 };

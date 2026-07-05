@@ -3,78 +3,67 @@
 KarplusStrongEditor::KarplusStrongEditor (KarplusStrongProcessor& p)
     : juce::AudioProcessorEditor (&p), processorRef (p)
 {
-    auto addRotary = [this] (juce::Slider& s)
-    {
-        s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-        s.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
-        addAndMakeVisible (s);
-    };
-
-    addRotary (excitationLengthSlider);
-    addRotary (pickPositionSlider);
-    addRotary (decaySlider);
-    addRotary (brightnessSlider);
-    addRotary (velBrightnessSlider);
-    addRotary (velDecaySlider);
-    addRotary (outputLevelSlider);
-
-    auto addLabel = [this] (juce::Label& l, const juce::String& text)
-    {
-        l.setText (text, juce::dontSendNotification);
-        l.setJustificationType (juce::Justification::centred);
-        l.setFont (juce::Font (12.0f, juce::Font::bold));
-        l.setColour (juce::Label::textColourId, juce::Colour (0xffcccccc));
-        addAndMakeVisible (l);
-    };
-
     titleLabel.setText ("Karplus-Strong", juce::dontSendNotification);
     titleLabel.setJustificationType (juce::Justification::centred);
-    titleLabel.setFont (juce::Font (18.0f, juce::Font::bold));
+    titleLabel.setFont (juce::Font (juce::FontOptions (18.0f, juce::Font::bold)));
     titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffeeeeee));
     addAndMakeVisible (titleLabel);
 
-    addLabel (excitationLabel,  "Excitation");
-    addLabel (excLengthLabel,   "Exc Length");
-    addLabel (pickPosLabel,      "Pick Pos");
-    addLabel (pickModelLabel,    "Pick Model");
-    addLabel (decayLabel,       "Decay");
-    addLabel (brightnessLabel,   "Brightness");
-    addLabel (velBrightLabel,    "Vel->Bright");
-    addLabel (velDecayLabel,     "Vel->Decay");
-    addLabel (outputLabel,       "Output");
+    auto setupGroup = [this] (juce::GroupComponent& group, const juce::String& text)
+    {
+        group.setText (text);
+        group.setColour (juce::GroupComponent::outlineColourId, juce::Colour (0xff444466));
+        group.setColour (juce::GroupComponent::textColourId, juce::Colour (0xffaaaaee));
+        addAndMakeVisible (group);
+    };
 
-    excitationCombo.addItem ("Noise", 1);
-    excitationCombo.addItem ("Sine", 2);
-    excitationCombo.addItem ("Dust", 3);
-    addAndMakeVisible (excitationCombo);
+    setupGroup (exciterGroup, "Exciter");
+    setupGroup (delayLineGroup, "Delay Line");
 
-    pickModelCombo.addItem ("Off", 1);
-    pickModelCombo.addItem ("Comb", 2);
-    pickModelCombo.addItem ("Two-delay", 3);
-    addAndMakeVisible (pickModelCombo);
+    addControl (Group::exciter, "excitation", "Excitation");
+    addControl (Group::exciter, "excitation_length", "Exc Length");
+    addControl (Group::exciter, "pick_position", "Pick Pos");
+    addControl (Group::exciter, "pick_model", "Pick Model");
 
-    exciterGroup.setText ("Exciter");
-    exciterGroup.setColour (juce::GroupComponent::outlineColourId, juce::Colour (0xff444466));
-    exciterGroup.setColour (juce::GroupComponent::textColourId, juce::Colour (0xffaaaaee));
-    addAndMakeVisible (exciterGroup);
+    addControl (Group::delayLine, "decay_time", "Decay Time");
+    addControl (Group::delayLine, "brightness", "Brightness");
+    addControl (Group::delayLine, "vel_brightness", "Vel->Bright");
+    addControl (Group::delayLine, "vel_decay", "Vel->Decay");
+    addControl (Group::delayLine, "output_level", "Output");
+    addControl (Group::delayLine, "voices", "Voices");
+    addControl (Group::delayLine, "key_track", "Key Track");
 
-    delayLineGroup.setText ("Delay Line");
-    delayLineGroup.setColour (juce::GroupComponent::outlineColourId, juce::Colour (0xff444466));
-    delayLineGroup.setColour (juce::GroupComponent::textColourId, juce::Colour (0xffaaaaee));
-    addAndMakeVisible (delayLineGroup);
+    setSize (800, 340);
+}
 
-    excitationAttach = std::make_unique<ComboBoxAttachment> (processorRef.apvts, "excitation", excitationCombo);
-    excLengthAttach  = std::make_unique<SliderAttachment>   (processorRef.apvts, "excitation_length", excitationLengthSlider);
-    pickPosAttach    = std::make_unique<SliderAttachment>   (processorRef.apvts, "pick_position", pickPositionSlider);
-    pickModelAttach  = std::make_unique<ComboBoxAttachment> (processorRef.apvts, "pick_model", pickModelCombo);
+void KarplusStrongEditor::addControl (Group group, const juce::String& paramId, const juce::String& labelText)
+{
+    auto control = std::make_unique<Control>();
+    control->group = group;
 
-    decayAttach      = std::make_unique<SliderAttachment> (processorRef.apvts, "decay", decaySlider);
-    brightnessAttach = std::make_unique<SliderAttachment> (processorRef.apvts, "brightness", brightnessSlider);
-    velBrightAttach  = std::make_unique<SliderAttachment> (processorRef.apvts, "vel_brightness", velBrightnessSlider);
-    velDecayAttach   = std::make_unique<SliderAttachment> (processorRef.apvts, "vel_decay", velDecaySlider);
-    outputAttach     = std::make_unique<SliderAttachment> (processorRef.apvts, "output_level", outputLevelSlider);
+    control->label.setText (labelText, juce::dontSendNotification);
+    control->label.setJustificationType (juce::Justification::centred);
+    control->label.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
+    control->label.setColour (juce::Label::textColourId, juce::Colour (0xffcccccc));
+    addAndMakeVisible (control->label);
 
-    setSize (560, 320);
+    if (auto* choiceParam = dynamic_cast<juce::AudioParameterChoice*> (processorRef.apvts.getParameter (paramId)))
+    {
+        control->combo = std::make_unique<juce::ComboBox>();
+        control->combo->addItemList (choiceParam->choices, 1);
+        addAndMakeVisible (*control->combo);
+        control->comboAttachment = std::make_unique<ComboBoxAttachment> (processorRef.apvts, paramId, *control->combo);
+    }
+    else
+    {
+        control->slider = std::make_unique<juce::Slider>();
+        control->slider->setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        control->slider->setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+        addAndMakeVisible (*control->slider);
+        control->sliderAttachment = std::make_unique<SliderAttachment> (processorRef.apvts, paramId, *control->slider);
+    }
+
+    controls.push_back (std::move (control));
 }
 
 void KarplusStrongEditor::paint (juce::Graphics& g)
@@ -88,55 +77,35 @@ void KarplusStrongEditor::resized()
     titleLabel.setBounds (bounds.removeFromTop (30).reduced (0, 4));
 
     auto area = bounds.reduced (10);
-    int halfWidth = area.getWidth() / 2;
     int gap = 8;
+    int exciterWidth = 320;
 
-    auto exciterBounds = area.withWidth (halfWidth - gap / 2);
-    auto delayBounds  = area.withTrimmedLeft (halfWidth + gap / 2);
+    auto exciterBounds = area.withWidth (exciterWidth);
+    auto delayBounds   = area.withTrimmedLeft (exciterWidth + gap);
 
     exciterGroup.setBounds (exciterBounds);
     delayLineGroup.setBounds (delayBounds);
 
-    auto exInner = exciterBounds.reduced (12, 20);
-    auto dlInner = delayBounds.reduced (12, 20);
+    layoutGroup (Group::exciter, exciterBounds.reduced (12, 20), 70);
+    layoutGroup (Group::delayLine, delayBounds.reduced (12, 20), 58);
+}
 
-    constexpr int colW = 84;
+void KarplusStrongEditor::layoutGroup (Group group, juce::Rectangle<int> inner, int columnWidth)
+{
     constexpr int lblH = 16;
     constexpr int ctrlH = 84;
-    constexpr int ctrlGap = 6;
+    constexpr int ctrlGap = 4;
 
-    struct Control { juce::Component* label; juce::Component* ctrl; };
+    int x = inner.getX();
+    int y = inner.getY();
 
-    Control exciterControls[] = {
-        { &excitationLabel, &excitationCombo },
-        { &excLengthLabel,   &excitationLengthSlider },
-        { &pickPosLabel,     &pickPositionSlider },
-        { &pickModelLabel,   &pickModelCombo },
-    };
-
-    int x = exInner.getX();
-    int y = exInner.getY();
-    for (auto& c : exciterControls)
+    for (auto& control : controls)
     {
-        c.label->setBounds (x, y, colW, lblH);
-        c.ctrl ->setBounds (x, y + lblH + 2, colW, ctrlH);
-        x += colW + ctrlGap;
-    }
+        if (control->group != group)
+            continue;
 
-    Control delayControls[] = {
-        { &decayLabel,       &decaySlider },
-        { &brightnessLabel,   &brightnessSlider },
-        { &velBrightLabel,    &velBrightnessSlider },
-        { &velDecayLabel,     &velDecaySlider },
-        { &outputLabel,       &outputLevelSlider },
-    };
-
-    x = dlInner.getX();
-    y = dlInner.getY();
-    for (auto& c : delayControls)
-    {
-        c.label->setBounds (x, y, colW, lblH);
-        c.ctrl ->setBounds (x, y + lblH + 2, colW, ctrlH);
-        x += colW + ctrlGap;
+        control->label.setBounds (x, y, columnWidth, lblH);
+        control->component().setBounds (x, y + lblH + 2, columnWidth, ctrlH);
+        x += columnWidth + ctrlGap;
     }
 }

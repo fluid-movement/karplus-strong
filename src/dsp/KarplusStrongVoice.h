@@ -2,6 +2,7 @@
 
 #include <juce_audio_basics/juce_audio_basics.h>
 #include "KarplusStrongDsp.h"
+#include "KsParams.h"
 
 class KarplusStrongSound : public juce::SynthesiserSound
 {
@@ -18,29 +19,31 @@ public:
         dsp.prepare (sampleRate);
     }
 
-    void setParameters (float decay, float brightness, int excitationType,
-                        float excitationLength, float pickPosition, int pickModel,
-                        float velBrightnessAmt, float velDecayAmt, float outputLevel)
+    void setParameters (const KsParams& params)
     {
-        dsp.setParameters (decay, brightness, excitationType, excitationLength,
-                           pickPosition, pickModel, velBrightnessAmt, velDecayAmt,
-                           outputLevel);
+        dsp.setParameters (params);
     }
 
-    bool canPlaySound (juce::SynthesiserSound*) override { return true; }
+    void setEnabled (bool shouldBeEnabled) { enabled = shouldBeEnabled; }
+
+    bool canPlaySound (juce::SynthesiserSound*) override { return enabled; }
 
     void startNote (int midiNoteNumber, float velocity,
                     juce::SynthesiserSound*, int) override
     {
         auto freq = juce::MidiMessage::getMidiNoteInHertz (midiNoteNumber);
-        dsp.noteOn (freq, velocity);
+        dsp.noteOn (static_cast<float> (freq), velocity);
     }
 
     void stopNote (float, bool allowTailOff) override
     {
         dsp.noteOff (allowTailOff);
+
         if (! allowTailOff)
+        {
+            dsp.reset();
             clearCurrentNote();
+        }
     }
 
     void renderNextBlock (juce::AudioBuffer<float>& outputBuffer, int startSample, int numSamples) override
@@ -63,4 +66,7 @@ public:
     void controllerMoved (int, int) override {}
 
     KarplusStrongDsp dsp;
+
+private:
+    bool enabled = true;
 };

@@ -91,6 +91,7 @@ target_include_directories(IntegrationTest PRIVATE
 )
 
 target_link_libraries(IntegrationTest PRIVATE
+    Catch2::Catch2WithMain
     juce::juce_audio_utils
     juce::juce_dsp
 )

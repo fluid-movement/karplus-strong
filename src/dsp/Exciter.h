@@ -2,41 +2,38 @@
 
 #include <cmath>
 #include <cstdint>
-#include <vector>
 #include <algorithm>
+#include "CircularBuffer.h"
+#include "KsCalibration.h"
+#include "KsParams.h"
 
 class Exciter
 {
 public:
-    static constexpr int maxDelaySamples = 192000;
-
     void prepare (double newSampleRate)
     {
         sampleRate = newSampleRate;
-        preDelayBuffer.assign (static_cast<size_t> (maxDelaySamples), 0.0f);
-        delay2Buffer.assign (static_cast<size_t> (maxDelaySamples), 0.0f);
-        delay3Buffer.assign (static_cast<size_t> (maxDelaySamples), 0.0f);
+        int bufferSize = static_cast<int> (sampleRate * ks::maxDelaySeconds);
+        preDelayBuffer.prepare (bufferSize);
+        delay2Buffer.prepare (bufferSize);
+        delay3Buffer.prepare (bufferSize);
     }
 
     void reset()
     {
-        std::fill (preDelayBuffer.begin(), preDelayBuffer.end(), 0.0f);
-        std::fill (delay2Buffer.begin(),   delay2Buffer.end(),   0.0f);
-        std::fill (delay3Buffer.begin(),   delay3Buffer.end(),   0.0f);
-        preWritePos = 0;
-        d2WritePos  = 0;
-        d3WritePos  = 0;
-        phase       = 0.0;
+        preDelayBuffer.clear();
+        delay2Buffer.clear();
+        delay3Buffer.clear();
+        phase = 0.0;
         burstRemaining = 0;
     }
 
-    void setParameters (int excitationType_, float excitationLength_,
-                        float pickPosition_, int pickModel_)
+    void setParameters (const KsParams& newParams)
     {
-        excitationType   = excitationType_;
-        excitationLength = std::clamp (excitationLength_, 1.0f, 1000.0f);
-        pickPosition     = pickPosition_;
-        pickModel        = pickModel_;
+        excitationType   = newParams.excitationType;
+        excitationLength = std::clamp (newParams.excitationLength, 1.0f, 1000.0f);
+        pickPosition     = newParams.pickPosition;
+        pickModel        = newParams.pickModel;
     }
 
     void noteOn (float delaySamples_)
@@ -66,9 +63,8 @@ public:
             case 1:
             {
                 float pd = pickPosition * delaySamples;
-                preDelayBuffer[preWritePos] = excitation;
-                float out = readDelay (preDelayBuffer, preWritePos, pd);
-                preWritePos = (preWritePos + 1) % maxDelaySamples;
+                float out = preDelayBuffer.readDelayed (pd);
+                preDelayBuffer.write (excitation);
                 return out;
             }
 
@@ -77,12 +73,10 @@ public:
                 float pos2 = pickPosition * delaySamples;
                 float d2 = delaySamples + pos2;
                 float d3 = std::max (1.0f, delaySamples - pos2);
-                delay2Buffer[d2WritePos] = excitation;
-                delay3Buffer[d3WritePos] = excitation;
-                float out = 0.5f * (readDelay (delay2Buffer, d2WritePos, d2)
-                                  + readDelay (delay3Buffer, d3WritePos, d3));
-                d2WritePos = (d2WritePos + 1) % maxDelaySamples;
-                d3WritePos = (d3WritePos + 1) % maxDelaySamples;
+                float out = 0.5f * (delay2Buffer.readDelayed (d2)
+                                  + delay3Buffer.readDelayed (d3));
+                delay2Buffer.write (excitation);
+                delay3Buffer.write (excitation);
                 return out;
             }
 
@@ -92,48 +86,42 @@ public:
     }
 
 private:
-    float readDelay (const std::vector<float>& buf, int wpos, float delaySamp) const
-    {
-        int d = static_cast<int> (delaySamp);
-        if (d < 1) d = 1;
-        if (d > maxDelaySamples - 1) d = maxDelaySamples - 1;
-        int readPos = wpos - d;
-        if (readPos < 0) readPos += maxDelaySamples;
-        return buf[static_cast<size_t> (readPos)];
-    }
-
     float generateExcitation()
     {
         switch (excitationType)
         {
             case 0:
-            {
-                uint32_t r = rngState;
-                r ^= r << 13;
-                r ^= r >> 17;
-                r ^= r << 5;
-                rngState = r;
-                return static_cast<float> (r) / static_cast<float> (0xFFFFFFFFu) * 2.0f - 1.0f;
-            }
+                return nextRandom() * 2.0f - 1.0f;
+
             case 1:
             {
-                phase += 2.0 * 3.14159265358979 * 440.0 / sampleRate;
-                if (phase > 2.0 * 3.14159265358979)
-                    phase -= 2.0 * 3.14159265358979;
+                phase += 2.0 * ks::pi * 440.0 / sampleRate;
+                if (phase > 2.0 * ks::pi)
+                    phase -= 2.0 * ks::pi;
                 return static_cast<float> (std::sin (phase));
             }
+
             case 2:
-            {
-                uint32_t r = rngState;
-                r ^= r << 13;
-                r ^= r >> 17;
-                r ^= r << 5;
-                rngState = r;
-                return (r & 1) ? 1.0f : -1.0f;
-            }
+                return (nextRandomBits() & 1) ? 1.0f : -1.0f;
+
             default:
                 return 0.0f;
         }
+    }
+
+    uint32_t nextRandomBits()
+    {
+        uint32_t r = rngState;
+        r ^= r << 13;
+        r ^= r >> 17;
+        r ^= r << 5;
+        rngState = r;
+        return r;
+    }
+
+    float nextRandom()
+    {
+        return static_cast<float> (nextRandomBits()) / static_cast<float> (0xFFFFFFFFu);
     }
 
     double sampleRate = 44100.0;
@@ -148,8 +136,5 @@ private:
 
     uint32_t rngState = 123456789u;
 
-    std::vector<float> preDelayBuffer, delay2Buffer, delay3Buffer;
-    int preWritePos = 0;
-    int d2WritePos  = 0;
-    int d3WritePos  = 0;
+    CircularBuffer preDelayBuffer, delay2Buffer, delay3Buffer;
 };

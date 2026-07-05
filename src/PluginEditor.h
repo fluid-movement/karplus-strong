@@ -16,36 +16,33 @@ private:
     using SliderAttachment   = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
+    enum class Group { exciter, delayLine };
+
+    struct Control
+    {
+        Group group = Group::exciter;
+        juce::Label label;
+        std::unique_ptr<juce::Slider> slider;
+        std::unique_ptr<juce::ComboBox> combo;
+        std::unique_ptr<SliderAttachment> sliderAttachment;
+        std::unique_ptr<ComboBoxAttachment> comboAttachment;
+
+        juce::Component& component()
+        {
+            return slider != nullptr ? static_cast<juce::Component&> (*slider)
+                                     : static_cast<juce::Component&> (*combo);
+        }
+    };
+
+    void addControl (Group group, const juce::String& paramId, const juce::String& labelText);
+    void layoutGroup (Group group, juce::Rectangle<int> inner, int columnWidth);
+
     KarplusStrongProcessor& processorRef;
 
-    juce::GroupComponent exciterGroup;
-    juce::GroupComponent delayLineGroup;
-
+    juce::GroupComponent exciterGroup, delayLineGroup;
     juce::Label titleLabel;
 
-    juce::Slider excitationLengthSlider, pickPositionSlider;
-    juce::ComboBox excitationCombo, pickModelCombo;
-
-    juce::Slider decaySlider, brightnessSlider,
-                 velBrightnessSlider, velDecaySlider,
-                 outputLevelSlider;
-
-    juce::Label excitationLabel  { {}, "Excitation" };
-    juce::Label excLengthLabel   { {}, "Exc Length" };
-    juce::Label pickPosLabel      { {}, "Pick Pos" };
-    juce::Label pickModelLabel    { {}, "Pick Model" };
-
-    juce::Label decayLabel       { {}, "Decay" };
-    juce::Label brightnessLabel   { {}, "Brightness" };
-    juce::Label velBrightLabel    { {}, "Vel->Bright" };
-    juce::Label velDecayLabel     { {}, "Vel->Decay" };
-    juce::Label outputLabel       { {}, "Output" };
-
-    std::unique_ptr<SliderAttachment>   excLengthAttach, pickPosAttach,
-                                        decayAttach, brightnessAttach,
-                                        velBrightAttach, velDecayAttach,
-                                        outputAttach;
-    std::unique_ptr<ComboBoxAttachment> excitationAttach, pickModelAttach;
+    std::vector<std::unique_ptr<Control>> controls;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KarplusStrongEditor)
 };

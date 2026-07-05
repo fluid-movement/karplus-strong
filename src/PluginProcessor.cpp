@@ -17,9 +17,16 @@ KarplusStrongProcessor::KarplusStrongProcessor()
               std::make_unique<juce::AudioParameterChoice>(
                   juce::ParameterID { "pick_model", 1 }, "Pick Model",
                   juce::StringArray { "Off", "Comb", "Two-delay" }, 0),
-              std::make_unique<juce::AudioParameterFloat>(
-                  juce::ParameterID { "decay", 1 }, "Decay",
-                  juce::NormalisableRange<float> (0.50f, 0.999f), 0.95f),
+               std::make_unique<juce::AudioParameterFloat>(
+                   juce::ParameterID { "decay_time", 1 }, "Decay Time",
+                   [] { auto r = juce::NormalisableRange<float> (0.5f, 40.0f); r.setSkewForCentre (8.0f); return r; }(),
+                   4.0f,
+                   juce::AudioParameterFloatAttributes()
+                       .withStringFromValueFunction ([](float value, int) { return juce::String (value, 2) + " s"; })
+                       .withValueFromStringFunction ([](const juce::String& text) { return text.trimCharactersAtEnd (" s").getFloatValue(); })),
+               std::make_unique<juce::AudioParameterFloat>(
+                   juce::ParameterID { "key_track", 1 }, "Key Track",
+                   juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f),
               std::make_unique<juce::AudioParameterFloat>(
                   juce::ParameterID { "brightness", 1 }, "Brightness",
                   juce::NormalisableRange<float> (0.0f, 1.0f), 0.5f),
@@ -36,8 +43,23 @@ KarplusStrongProcessor::KarplusStrongProcessor()
                   juce::ParameterID { "voices", 1 }, "Voices", 1, 16, 8),
           })
 {
+    excitationParam       = apvts.getRawParameterValue ("excitation");
+    excitationLengthParam = apvts.getRawParameterValue ("excitation_length");
+    pickPositionParam     = apvts.getRawParameterValue ("pick_position");
+    pickModelParam        = apvts.getRawParameterValue ("pick_model");
+    decayTimeParam        = apvts.getRawParameterValue ("decay_time");
+    keyTrackParam         = apvts.getRawParameterValue ("key_track");
+    brightnessParam       = apvts.getRawParameterValue ("brightness");
+    velBrightnessParam    = apvts.getRawParameterValue ("vel_brightness");
+    velDecayParam         = apvts.getRawParameterValue ("vel_decay");
+    outputLevelParam      = apvts.getRawParameterValue ("output_level");
+    voicesParam           = apvts.getRawParameterValue ("voices");
+
     synth.addSound (new KarplusStrongSound());
-    updateNumVoices (8);
+    for (int i = 0; i < maxVoices; ++i)
+        synth.addVoice (new KarplusStrongVoice());
+
+    updateNumVoices (static_cast<int> (voicesParam->load()));
 }
 
 void KarplusStrongProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -54,30 +76,28 @@ void KarplusStrongProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 {
     buffer.clear();
 
-    int numVoices = static_cast<int> (apvts.getRawParameterValue ("voices")->load());
-    if (numVoices != currentNumVoices)
-        updateNumVoices (numVoices);
-
+    updateNumVoices (static_cast<int> (voicesParam->load()));
     updateVoiceParameters();
     synth.renderNextBlock (buffer, midi, 0, buffer.getNumSamples());
 }
 
 void KarplusStrongProcessor::updateVoiceParameters()
 {
-    float decay            = apvts.getRawParameterValue ("decay")->load();
-    float brightness       = apvts.getRawParameterValue ("brightness")->load();
-    int   excitationType  = static_cast<int> (apvts.getRawParameterValue ("excitation")->load());
-    float excitationLength= apvts.getRawParameterValue ("excitation_length")->load();
-    float pickPosition    = apvts.getRawParameterValue ("pick_position")->load();
-    int   pickModel       = static_cast<int> (apvts.getRawParameterValue ("pick_model")->load());
-    float velBright       = apvts.getRawParameterValue ("vel_brightness")->load();
-    float velDecay        = apvts.getRawParameterValue ("vel_decay")->load();
-    float outputLevel     = apvts.getRawParameterValue ("output_level")->load();
+    KsParams params;
+    params.excitationType   = static_cast<int> (excitationParam->load());
+    params.excitationLength = excitationLengthParam->load();
+    params.pickPosition     = pickPositionParam->load();
+    params.pickModel        = static_cast<int> (pickModelParam->load());
+    params.decayTime        = decayTimeParam->load();
+    params.keyTrack         = keyTrackParam->load();
+    params.brightness       = brightnessParam->load();
+    params.velBrightness    = velBrightnessParam->load();
+    params.velDecay         = velDecayParam->load();
+    params.outputLevel      = outputLevelParam->load();
 
     for (int i = 0; i < synth.getNumVoices(); ++i)
         if (auto* voice = dynamic_cast<KarplusStrongVoice*> (synth.getVoice (i)))
-            voice->setParameters (decay, brightness, excitationType, excitationLength,
-                                  pickPosition, pickModel, velBright, velDecay, outputLevel);
+            voice->setParameters (params);
 }
 
 void KarplusStrongProcessor::updateNumVoices (int newNumVoices)
@@ -85,20 +105,11 @@ void KarplusStrongProcessor::updateNumVoices (int newNumVoices)
     if (newNumVoices == currentNumVoices)
         return;
 
-    synth.clearVoices();
-    for (int i = 0; i < newNumVoices; ++i)
-        synth.addVoice (new KarplusStrongVoice());
+    for (int i = 0; i < synth.getNumVoices(); ++i)
+        if (auto* voice = dynamic_cast<KarplusStrongVoice*> (synth.getVoice (i)))
+            voice->setEnabled (i < newNumVoices);
 
     currentNumVoices = newNumVoices;
-
-    if (getSampleRate() > 0)
-    {
-        for (int i = 0; i < synth.getNumVoices(); ++i)
-            if (auto* voice = dynamic_cast<KarplusStrongVoice*> (synth.getVoice (i)))
-                voice->prepare (getSampleRate(), 512);
-    }
-
-    updateVoiceParameters();
 }
 
 juce::AudioProcessorEditor* KarplusStrongProcessor::createEditor()

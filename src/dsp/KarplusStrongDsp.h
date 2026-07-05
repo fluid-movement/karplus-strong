@@ -1,9 +1,8 @@
 #pragma once
 
-#include <cmath>
-#include <algorithm>
 #include "Exciter.h"
 #include "KsDelayLine.h"
+#include "KsParams.h"
 
 class KarplusStrongDsp
 {
@@ -20,17 +19,15 @@ public:
         delayLine.reset();
     }
 
-    void setParameters (float decay, float brightness, int excitationType,
-                        float excitationLength, float pickPosition, int pickModel,
-                        float velBrightnessAmt, float velDecayAmt, float outputLevel)
+    void setParameters (const KsParams& params)
     {
-        delayLine.setParameters (decay, brightness, velBrightnessAmt, velDecayAmt, outputLevel);
-        exciter.setParameters (excitationType, excitationLength, pickPosition, pickModel);
+        delayLine.setParameters (params);
+        exciter.setParameters (params);
     }
 
     void noteOn (float frequency, float velocity)
     {
-        float delaySamp = delayLine.getSampleRate() / frequency;
+        float delaySamp = static_cast<float> (delayLine.getSampleRate()) / frequency;
         exciter.noteOn (delaySamp);
         delayLine.noteOn (frequency, velocity, exciter.getExcitationLength());
     }

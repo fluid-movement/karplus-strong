@@ -1,7 +1,5 @@
 # Karplus-Strong VST3/AU Plugin
 
-## Project overview
-
 A polyphonic Karplus-Strong plucked-string synthesizer built with JUCE 8 and
 CMake. Builds as VST3, AU, and Standalone for macOS (arm64).
 
@@ -30,9 +28,29 @@ Plugins auto-install to system folders via `COPY_PLUGIN_AFTER_BUILD TRUE`.
 ## Running tests
 
 ```bash
-cmake --build build --config Release --target KarplusStrongTests
+cmake --build build --config Release --target KarplusStrongTests IntegrationTest
 ctest --test-dir build -C Release --output-on-failure
 ```
+
+## Feature docs
+
+Detailed documentation lives in `docs/`. Start at `docs/README.md` for an
+index. Read the specific file you need:
+
+| Read… | When… |
+|---|---|
+| `docs/README.md` | first — index of all docs |
+| `docs/architecture.md` | you need to understand how modules fit together |
+| `docs/dsp.md` | editing the DSP, adding an exciter, changing the KS algorithm |
+| `docs/parameters.md` | adding/renaming/removing an APVTS parameter |
+| `docs/voice-and-synth.md` | changing note lifecycle, polyphony, or release |
+| `docs/ui.md` | editing the GUI layout or controls |
+| `docs/build-and-test.md` | building, testing, or verifying the plugin |
+| `docs/gotchas.md` | before any edit — known traps and design decisions |
+
+**Read `docs/gotchas.md` before making changes** — it documents bugs we've
+already hit (e.g. `currentNumVoices` must init to `0`, `noteOff` is a no-op)
+and rules that must not regress.
 
 ## Project structure
 
@@ -42,68 +60,15 @@ src/
 ├── PluginEditor.h/cpp       — GUI (two-panel: Exciter / Delay Line GroupComponents)
 └── dsp/
     ├── Exciter.h            — Excitation generation (noise/sine/dust) + pick model routing
-    ├── KsDelayLine.h        — KS delay buffer + lowpass + feedback + release ramp + silence detection
+    ├── KsDelayLine.h        — KS delay buffer + lowpass + feedback + silence detection
     ├── KarplusStrongDsp.h   — Thin composition of Exciter + KsDelayLine (no JUCE dependency, testable)
     └── KarplusStrongVoice.h — SynthesiserVoice wrapper around KarplusStrongDsp
 tests/
 ├── test_dsp.cpp             — Catch2 unit tests for KarplusStrongDsp, Exciter, KsDelayLine
 └── test_integration.cpp     — Headless integration test (full AudioProcessor + MIDI)
+docs/
+└── README.md + per-feature docs
 ```
-
-## Architecture
-
-- **PluginProcessor** owns a `juce::Synthesiser` populated with
-  `KarplusStrongVoice` instances. Parameters are managed via
-  `AudioProcessorValueTreeState` (APVTS) — 10 parameters exposed to the host.
-  `processBlock()` checks for voice-count changes and updates all voice
-  parameters each block.
-
-- **KarplusStrongDsp** is a thin facade composing **Exciter** (excitation
-  generation + pick model routing) and **KsDelayLine** (delay buffer +
-  first-order lowpass + feedback gain + release ramp + silence detection).
-  `noteOn()` computes delay length from frequency using the delay line's
-  sample rate, seeds the exciter burst, and initializes the delay line.
-  `processSample()` pulls excitation from the exciter (zero after burst),
-  feeds it to the delay line which falls back to feedback when excitation
-  is zero.
-
-- **KarplusStrongVoice** extends `juce::SynthesiserVoice`. On `startNote()`:
-  calls `dsp.noteOn(freq, velocity)`. In `renderNextBlock()`: calls
-  `dsp.processSample()` per sample, writes to stereo buffer, breaks and
-  clears current note when `dsp.isSilent()`.
-
-- **PluginEditor** creates rotary sliders and combo boxes bound to APVTS
-  parameters via `SliderAttachment` / `ComboBoxAttachment`. Dark background
-  (`0xff1a1a2e`), two-panel layout with GroupComponents (Exciter left,
-  Delay Line right).
-
-## Key JUCE APIs used
-
-| Purpose | JUCE class |
-|---|---|
-| Polyphony / voice allocation | `juce::Synthesiser` + `juce::SynthesiserVoice` |
-| Delay line | `std::vector<float>` circular buffer |
-| Lowpass filter | First-order RC (custom) |
-| Random noise | xorshift32 (custom) |
-| Parameter management | `juce::AudioProcessorValueTreeState` |
-| Parameter types | `AudioParameterFloat`, `AudioParameterChoice`, `AudioParameterInt` |
-| UI controls | `juce::Slider` (rotary), `juce::ComboBox`, `juce::Label` |
-| UI layout | Manual `setBounds()` in `resized()` |
-
-## Parameters (APVTS)
-
-| ID | Name | Type | Range |
-|---|---|---|---|
-| `excitation` | Excitation Type | Choice | Noise/Sine/Dust |
-| `excitation_length` | Excitation Length | Float | 1 – 1000 |
-| `pick_position` | Pick Position | Float | 0 – 0.5 |
-| `pick_model` | Pick Model | Choice | Off/Comb/Two-delay |
-| `decay` | Decay | Float | 0.50 – 0.999 |
-| `brightness` | Brightness | Float | 0 – 1 |
-| `vel_brightness` | Velocity->Brightness | Float | 0 – 1 |
-| `vel_decay` | Velocity->Decay | Float | 0 – 1 |
-| `output_level` | Output Level | Float | 0 – 1 |
-| `voices` | Voices | Int | 1 – 16 |
 
 ## Conventions
 

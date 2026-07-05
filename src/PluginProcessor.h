@@ -7,6 +7,8 @@
 class KarplusStrongProcessor : public juce::AudioProcessor
 {
 public:
+    static constexpr int maxVoices = 16;
+
     KarplusStrongProcessor();
     ~KarplusStrongProcessor() override = default;
 
@@ -42,6 +44,18 @@ public:
 private:
     juce::Synthesiser synth;
     int currentNumVoices = 0;
+
+    std::atomic<float>* excitationParam       = nullptr;
+    std::atomic<float>* excitationLengthParam = nullptr;
+    std::atomic<float>* pickPositionParam     = nullptr;
+    std::atomic<float>* pickModelParam        = nullptr;
+    std::atomic<float>* decayTimeParam        = nullptr;
+    std::atomic<float>* keyTrackParam         = nullptr;
+    std::atomic<float>* brightnessParam       = nullptr;
+    std::atomic<float>* velBrightnessParam    = nullptr;
+    std::atomic<float>* velDecayParam         = nullptr;
+    std::atomic<float>* outputLevelParam      = nullptr;
+    std::atomic<float>* voicesParam           = nullptr;
 
     void updateVoiceParameters();
     void updateNumVoices (int newNumVoices);

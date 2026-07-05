@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 class CircularBuffer
@@ -27,11 +28,19 @@ public:
 
     float readDelayed (float delaySamples) const
     {
-        int d = std::clamp (static_cast<int> (delaySamples), 1, size - 1);
-        int readPos = writePos - d;
-        if (readPos < 0)
-            readPos += size;
-        return buffer[static_cast<size_t> (readPos)];
+        float d = std::clamp (delaySamples, 1.0f, static_cast<float> (size - 1));
+        float readPosF = static_cast<float> (writePos) - d;
+
+        int i0 = static_cast<int> (std::floor (readPosF));
+        float frac = readPosF - static_cast<float> (i0);
+
+        int idx0 = i0 % size;
+        if (idx0 < 0)
+            idx0 += size;
+        int idx1 = (idx0 + 1) % size;
+
+        return buffer[static_cast<size_t> (idx0)] * (1.0f - frac)
+             + buffer[static_cast<size_t> (idx1)] * frac;
     }
 
     int getSize() const { return size; }

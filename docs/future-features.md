@@ -1,8 +1,25 @@
 # Future Features
 
-Read when… you are deciding what to build next, or you want the musical rationale behind a planned feature. This is a roadmap of ideas, not a spec — nothing here is implemented.
+Read when… you are deciding what to build next, or you want the musical rationale behind a planned feature. This is a roadmap of ideas; rows marked **✅ Implemented** have shipped — see `dsp.md` / `parameters.md` for the current behavior and this file only for the original rationale. Everything else is still just an idea.
 
 Goal: make the plugin a great-sounding, *musical* instrument that leans into the organic-but-synthetic character of Karplus-Strong. Features are grouped by theme; each lists the musical payoff, where it hooks into the current code, and rough effort (S/M/L).
+
+## Implemented in the 2026-07 feature pass
+
+Fractional delay interpolation, pitch-tracked sine exciter + harmonic control,
+exciter tone filter, velocity→excitation-length, feedback-loop saturation
+(drive), note-off damping (Ring/Damp mode), per-note humanization, and true
+stereo voice spread. Details in `dsp.md` and `parameters.md`.
+
+Not implemented — each needs a product/design decision this pass didn't make
+(bend range and glide-time UX, dispersion filter tuning, which new exciter
+types and their controls, detune amount and stereo image for coupled strings,
+sympathetic-resonance bleed level, body-filter design, strum stagger amount,
+MPE/aftertouch mapping, FX chain controls, curated preset content, and
+randomize bounds): pitch bend/glide, stiffness/inharmonicity dispersion, new
+exciter types (chirp/velvet/bow), coupled detuned string pairs, sympathetic
+resonance, body resonator, strum mode, MPE/aftertouch, FX chain, presets, and
+randomize. These stay below as-is.
 
 ## 1. Tuning & pitch (foundations)
 
@@ -10,7 +27,7 @@ These unlock almost everything else. Build first.
 
 | Feature | Musical payoff | Hook | Effort |
 |---|---|---|---|
-| Fractional delay interpolation | Delay length is currently integer-truncated (`CircularBuffer::readDelayed`, `src/dsp/CircularBuffer.h:28`), so high notes are audibly out of tune. Allpass or Lagrange interpolation fixes intonation and is the prerequisite for vibrato, glide, and detune. Implemented once in `CircularBuffer`, both the string and the pick-model combs get it. | `src/dsp/CircularBuffer.h` | M |
+| ✅ Fractional delay interpolation | Delay length is currently integer-truncated (`CircularBuffer::readDelayed`, `src/dsp/CircularBuffer.h:28`), so high notes are audibly out of tune. Allpass or Lagrange interpolation fixes intonation and is the prerequisite for vibrato, glide, and detune. Implemented once in `CircularBuffer`, both the string and the pick-model combs get it. | `src/dsp/CircularBuffer.h` | M |
 | Pitch bend + glide/portamento | Expressive slides and bends — a huge part of real string playing. Smoothly ramp `delaySamples` instead of jumping. | `pitchWheelMoved` is empty at `src/dsp/KarplusStrongVoice.h:65` | M |
 | Stiffness / inharmonicity | An allpass dispersion filter in the feedback loop stretches upper partials: piano-, bell-, and sitar-like tones from one knob. The single biggest "organic but synthetic" payoff. | Ring phase in `KsDelayLine::processSample`, `src/dsp/KsDelayLine.h:64-67` | M |
 
@@ -18,16 +35,16 @@ These unlock almost everything else. Build first.
 
 | Feature | Musical payoff | Hook | Effort |
 |---|---|---|---|
-| Pitch-tracked sine exciter | The sine exciter is hardcoded to 440 Hz (`src/dsp/Exciter.h:96-102`). Tracking the played note (plus a harmonic-number control) turns it from a test tone into a playable timbre. | `Exciter::generateExcitation` | S |
-| Exciter color filter | Lowpass/highpass on the burst = soft fingertip vs. hard plectrum. Cheap, immediately audible. | Filter the burst in `Exciter::processSample` | S |
+| ✅ Pitch-tracked sine exciter | The sine exciter is hardcoded to 440 Hz (`src/dsp/Exciter.h:96-102`). Tracking the played note (plus a harmonic-number control) turns it from a test tone into a playable timbre. | `Exciter::generateExcitation` | S |
+| ✅ Exciter color filter | Lowpass/highpass on the burst = soft fingertip vs. hard plectrum. Cheap, immediately audible. | Filter the burst in `Exciter::processSample` | S |
 | New exciter types | Chirp sweep (bouncing pick), shaped/velvet noise (breathier pluck), continuous "bow" excitation that sustains while the key is held — the reserved `noteOff` hook exists for exactly this (see `docs/gotchas.md`). | `Exciter::generateExcitation` switch | M–L |
-| Velocity → excitation length/color | Hard hits get longer, brighter bursts. Extends the existing velocity-mod pattern at `src/dsp/KsDelayLine.h:42-43`. | `KarplusStrongDsp::noteOn` | S |
+| ✅ Velocity → excitation length | Hard hits get longer bursts. Extends the existing velocity-mod pattern at `src/dsp/KsDelayLine.h:42-43`. (Color modulation not done — brightness-by-velocity already existed via `vel_brightness`; only length was new.) | `KarplusStrongDsp::noteOn` | S |
 
 ## 3. String character & realism
 
 | Feature | Musical payoff | Hook | Effort |
 |---|---|---|---|
-| Feedback-loop saturation | Gentle `tanh` drive inside the loop makes overtones bloom and shift as notes decay — gut-string / sitar flavor. Cheapest big character win in the whole list. | Ring phase, `src/dsp/KsDelayLine.h:66-67` | S |
+| ✅ Feedback-loop saturation | Gentle `tanh` drive inside the loop makes overtones bloom and shift as notes decay — gut-string / sitar flavor. Cheapest big character win in the whole list. | Ring phase, `src/dsp/KsDelayLine.h:66-67` | S |
 | Coupled / detuned string pairs | Two delay lines per note with slight detune and stereo spread: 12-string shimmer, piano-unison beating, chorus without a chorus pedal. | Second `KsDelayLine` in `src/dsp/KarplusStrongDsp.h` | M |
 | Sympathetic resonance | Held voices receive a small bleed of the other voices' output and ring along — open-tuning drone magic, instant "instrument in a room" feel. | Voice mixing in `KarplusStrongProcessor::processBlock` | L |
 | Body resonator | A small fixed comb/modal filter bank after the string (guitar/violin body) turns "string in a vacuum" into an instrument. A body-size/type control is very musical. | Post-synth processing in `processBlock` | M–L |
@@ -36,8 +53,8 @@ These unlock almost everything else. Build first.
 
 | Feature | Musical payoff | Hook | Effort |
 |---|---|---|---|
-| Damping on note-off (Ring/Damp mode) | Notes currently always ring out (`stopNote` at `src/dsp/KarplusStrongVoice.h:38-47`; deliberate design, see `docs/gotchas.md`). A Damp mode with a release-damping time gives palm mutes and tight staccato playing. | `KsDelayLine::noteOff` `src/dsp/KsDelayLine.h:56` | M |
-| Per-note humanization | Tiny random detune, brightness, and pick-position variance per `noteOn` kills the machine-gun effect on repeated notes. One "Human" knob. | `KarplusStrongDsp::noteOn` | S |
+| ✅ Damping on note-off (Ring/Damp mode) | Notes currently always ring out (`stopNote` at `src/dsp/KarplusStrongVoice.h:38-47`; deliberate design, see `docs/gotchas.md`). A Damp mode with a release-damping time gives palm mutes and tight staccato playing. | `KsDelayLine::noteOff` `src/dsp/KsDelayLine.h:56` | M |
+| ✅ Per-note humanization | Tiny random detune, brightness, and pick-position variance per `noteOn` kills the machine-gun effect on repeated notes. One "Human" knob. | `KarplusStrongDsp::noteOn` | S |
 | Strum mode | Millisecond-scale onset stagger across simultaneous chord notes — chords stop sounding quantized. | MIDI handling in `processBlock` | M |
 | MPE / poly aftertouch → brightness & damping | Pressing into a note to brighten or choke it. The damping filter is already per-voice, so this is a natural fit. | `controllerMoved` / aftertouch, `src/dsp/KarplusStrongVoice.h:66` | M–L |
 
@@ -45,7 +62,7 @@ These unlock almost everything else. Build first.
 
 | Feature | Musical payoff | Hook | Effort |
 |---|---|---|---|
-| True stereo (per-voice pan spread) | Output is currently mono copied to both channels (`src/dsp/KarplusStrongVoice.h:54-55`). Spreading voices across the field makes chords wide and alive. | `KarplusStrongVoice::renderNextBlock` | S |
+| ✅ True stereo (per-voice pan spread) | Output is currently mono copied to both channels (`src/dsp/KarplusStrongVoice.h:54-55`). Spreading voices across the field makes chords wide and alive. | `KarplusStrongVoice::renderNextBlock` | S |
 | Minimal FX: drive → chorus → reverb | A string without a room sounds unfinished. `juce_dsp` is already linked (`CMakeLists.txt`) and provides `juce::dsp::Reverb` and `juce::dsp::Chorus`. | Post-synth chain in `processBlock` | M |
 
 ## 6. Workflow

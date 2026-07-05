@@ -24,6 +24,9 @@ KarplusStrongEditor::KarplusStrongEditor (KarplusStrongProcessor& p)
     addControl (Group::exciter, "excitation_length", "Exc Length");
     addControl (Group::exciter, "pick_position", "Pick Pos");
     addControl (Group::exciter, "pick_model", "Pick Model");
+    addControl (Group::exciter, "sine_harmonic", "Sine Harm");
+    addControl (Group::exciter, "exciter_tone", "Exc Tone");
+    addControl (Group::exciter, "vel_excitation_length", "Vel->Length");
 
     addControl (Group::delayLine, "decay_time", "Decay Time");
     addControl (Group::delayLine, "brightness", "Brightness");
@@ -32,8 +35,13 @@ KarplusStrongEditor::KarplusStrongEditor (KarplusStrongProcessor& p)
     addControl (Group::delayLine, "output_level", "Output");
     addControl (Group::delayLine, "voices", "Voices");
     addControl (Group::delayLine, "key_track", "Key Track");
+    addControl (Group::delayLine, "drive", "Drive");
+    addControl (Group::delayLine, "damp_mode", "Damp Mode");
+    addControl (Group::delayLine, "release_time", "Release");
+    addControl (Group::delayLine, "humanize", "Humanize");
+    addControl (Group::delayLine, "stereo_spread", "Stereo");
 
-    setSize (800, 340);
+    setSize (800, 420);
 }
 
 void KarplusStrongEditor::addControl (Group group, const juce::String& paramId, const juce::String& labelText)
@@ -95,6 +103,8 @@ void KarplusStrongEditor::layoutGroup (Group group, juce::Rectangle<int> inner, 
     constexpr int lblH = 16;
     constexpr int ctrlH = 84;
     constexpr int ctrlGap = 4;
+    constexpr int rowGap = 4;
+    constexpr int rowHeight = lblH + 2 + ctrlH;
 
     int x = inner.getX();
     int y = inner.getY();
@@ -103,6 +113,12 @@ void KarplusStrongEditor::layoutGroup (Group group, juce::Rectangle<int> inner, 
     {
         if (control->group != group)
             continue;
+
+        if (x + columnWidth > inner.getRight() && x != inner.getX())
+        {
+            x = inner.getX();
+            y += rowHeight + rowGap;
+        }
 
         control->label.setBounds (x, y, columnWidth, lblH);
         control->component().setBounds (x, y + lblH + 2, columnWidth, ctrlH);

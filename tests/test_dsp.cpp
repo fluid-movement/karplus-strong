@@ -249,7 +249,7 @@ TEST_CASE("Exciter produces non-zero output during burst", "[exciter]")
     exc.prepare (44100.0);
     exc.setParameters (makeParams (0.3f, 0.5f, 0, 100.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f));
 
-    exc.noteOn (100.0f);
+    exc.noteOn (100.0f, 440.0f, 1.0f);
     bool anyNonZero = false;
     for (int i = 0; i < 100; ++i)
     {
@@ -268,7 +268,7 @@ TEST_CASE("Exciter becomes inactive after burst length samples", "[exciter]")
     exc.prepare (44100.0);
     exc.setParameters (makeParams (0.3f, 0.5f, 0, 50.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f));
 
-    exc.noteOn (100.0f);
+    exc.noteOn (100.0f, 440.0f, 1.0f);
     REQUIRE (exc.isActive());
 
     for (int i = 0; i < 49; ++i)
@@ -285,6 +285,7 @@ TEST_CASE("Exciter getExcitationLength returns configured value", "[exciter]")
     Exciter exc;
     exc.prepare (44100.0);
     exc.setParameters (makeParams (0.3f, 0.5f, 0, 250.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f));
+    exc.noteOn (100.0f, 440.0f, 1.0f);
 
     REQUIRE (std::abs (exc.getExcitationLength() - 250.0f) < 1e-3f);
 }
@@ -295,7 +296,7 @@ TEST_CASE("Exciter processSample returns zero after burst ends", "[exciter]")
     exc.prepare (44100.0);
     exc.setParameters (makeParams (0.3f, 0.5f, 0, 20.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f));
 
-    exc.noteOn (200.0f);
+    exc.noteOn (200.0f, 440.0f, 1.0f);
     for (int i = 0; i < 21; ++i)
         exc.processSample();
 
@@ -571,4 +572,265 @@ TEST_CASE("computeFeedbackGain clamps at the maximum stable gain", "[calibration
     float delay = sr / 880.0f;
     float gain = ks::computeFeedbackGain (100.0f, 880.0f, delay, 0.0f, ks::minCutoffHz, sr);
     REQUIRE (gain == ks::maxFeedbackGain);
+}
+
+TEST_CASE("applySaturation bypasses at zero amount", "[calibration]")
+{
+    REQUIRE (ks::applySaturation (0.37f, 0.0f) == 0.37f);
+}
+
+TEST_CASE("applySaturation preserves unity at full-scale input", "[calibration]")
+{
+    float out = ks::applySaturation (1.0f, 1.0f);
+    REQUIRE (std::abs (out - 1.0f) < 1e-3f);
+}
+
+TEST_CASE("applySaturation boosts small signals toward the drive curve", "[calibration]")
+{
+    float out = ks::applySaturation (0.1f, 1.0f);
+    REQUIRE (out > 0.1f);
+}
+
+TEST_CASE("computeReleaseCoeff decays to the silence envelope over the release time", "[calibration]")
+{
+    float sr = 44100.0f;
+    float releaseTime = 0.5f;
+    float coeff = ks::computeReleaseCoeff (releaseTime, sr);
+    float gain = std::pow (coeff, releaseTime * sr);
+    REQUIRE (std::abs (gain - ks::silenceEnvelope) < 1e-4f);
+}
+
+TEST_CASE("CircularBuffer linearly interpolates fractional delays", "[primitives]")
+{
+    CircularBuffer buf;
+    buf.prepare (64);
+    buf.write (1.0f);
+    for (int i = 0; i < 9; ++i)
+        buf.write (0.0f);
+
+    REQUIRE (std::abs (buf.readDelayed (9.5f) - 0.5f) < 1e-6f);
+    REQUIRE (std::abs (buf.readDelayed (10.0f) - 1.0f) < 1e-6f);
+}
+
+TEST_CASE("Sine exciter tracks the played note frequency", "[exciter]")
+{
+    Exciter excLow, excHigh;
+    excLow.prepare (44100.0);
+    excHigh.prepare (44100.0);
+
+    auto params = makeParams (0.3f, 0.5f, 1, 200.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+    excLow.setParameters (params);
+    excHigh.setParameters (params);
+
+    excLow.noteOn (100.0f, 220.0f, 1.0f);
+    excHigh.noteOn (100.0f, 880.0f, 1.0f);
+
+    bool anyDifferent = false;
+    for (int i = 0; i < 100; ++i)
+    {
+        if (std::abs (excLow.processSample() - excHigh.processSample()) > 1e-4f)
+        {
+            anyDifferent = true;
+            break;
+        }
+    }
+    REQUIRE (anyDifferent);
+}
+
+TEST_CASE("Sine harmonic control changes the exciter's tracked pitch", "[exciter]")
+{
+    auto params = makeParams (0.3f, 0.5f, 1, 200.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+
+    Exciter fundamental;
+    fundamental.prepare (44100.0);
+    fundamental.setParameters (params);
+    fundamental.noteOn (100.0f, 220.0f, 1.0f);
+
+    params.sineHarmonic = 3;
+    Exciter thirdHarmonic;
+    thirdHarmonic.prepare (44100.0);
+    thirdHarmonic.setParameters (params);
+    thirdHarmonic.noteOn (100.0f, 220.0f, 1.0f);
+
+    bool anyDifferent = false;
+    for (int i = 0; i < 100; ++i)
+    {
+        if (std::abs (fundamental.processSample() - thirdHarmonic.processSample()) > 1e-4f)
+        {
+            anyDifferent = true;
+            break;
+        }
+    }
+    REQUIRE (anyDifferent);
+}
+
+TEST_CASE("Exciter tone filter darkens the burst relative to bypass", "[exciter]")
+{
+    auto params = makeParams (0.3f, 0.5f, 0, 300.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+
+    Exciter bright;
+    bright.prepare (44100.0);
+    params.exciterTone = 1.0f;
+    bright.setParameters (params);
+    bright.noteOn (200.0f, 440.0f, 1.0f);
+
+    Exciter dark;
+    dark.prepare (44100.0);
+    params.exciterTone = 0.0f;
+    dark.setParameters (params);
+    dark.noteOn (200.0f, 440.0f, 1.0f);
+
+    float brightRoughness = 0.0f, darkRoughness = 0.0f;
+    float prevBright = 0.0f, prevDark = 0.0f;
+    for (int i = 0; i < 300; ++i)
+    {
+        float b = bright.processSample();
+        float d = dark.processSample();
+        brightRoughness += std::abs (b - prevBright);
+        darkRoughness += std::abs (d - prevDark);
+        prevBright = b;
+        prevDark = d;
+    }
+
+    REQUIRE (darkRoughness < brightRoughness);
+}
+
+TEST_CASE("Velocity modulates excitation length", "[exciter]")
+{
+    auto params = makeParams (0.3f, 0.5f, 0, 100.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+    params.velExcitationLength = 1.0f;
+
+    Exciter softHit;
+    softHit.prepare (44100.0);
+    softHit.setParameters (params);
+    softHit.noteOn (200.0f, 440.0f, 0.1f);
+
+    Exciter hardHit;
+    hardHit.prepare (44100.0);
+    hardHit.setParameters (params);
+    hardHit.noteOn (200.0f, 440.0f, 1.0f);
+
+    REQUIRE (hardHit.getExcitationLength() > softHit.getExcitationLength());
+}
+
+TEST_CASE("Damp mode fades to silence quickly after noteOff, Ring mode keeps ringing", "[delayline]")
+{
+    auto baseParams = makeParams (0.3f, 1.0f, 0, 100.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+
+    KsDelayLine ring;
+    ring.prepare (44100.0);
+    ring.setParameters (baseParams);
+    ring.noteOn (440.0f, 1.0f, 100.0f);
+    for (int i = 0; i < 100; ++i)
+        ring.processSample (0.5f);
+    ring.noteOff (true);
+
+    float ringMax = 0.0f;
+    for (int i = 0; i < 44100; ++i)
+        ringMax = std::max (ringMax, std::abs (ring.processSample (0.0f)));
+    REQUIRE (ringMax > 0.01f);
+
+    auto dampParams = baseParams;
+    dampParams.dampMode = 1;
+    dampParams.releaseTime = 0.05f;
+
+    KsDelayLine damp;
+    damp.prepare (44100.0);
+    damp.setParameters (dampParams);
+    damp.noteOn (440.0f, 1.0f, 100.0f);
+    for (int i = 0; i < 100; ++i)
+        damp.processSample (0.5f);
+    damp.noteOff (true);
+
+    for (int i = 0; i < 44100; ++i)
+        damp.processSample (0.0f);
+    REQUIRE (damp.isSilent());
+}
+
+TEST_CASE("Humanize adds per-note pitch/tone variance", "[dsp]")
+{
+    auto params = makeParams (0.3f, 0.5f, 0, 100.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+    params.humanize = 1.0f;
+
+    KarplusStrongDsp dsp;
+    dsp.prepare (44100.0);
+    dsp.setParameters (params);
+
+    dsp.noteOn (440.0f, 1.0f);
+    for (int i = 0; i < 200; ++i)
+        dsp.processSample();
+    std::vector<float> first;
+    for (int i = 0; i < 50; ++i)
+        first.push_back (dsp.processSample());
+
+    dsp.noteOn (440.0f, 1.0f);
+    for (int i = 0; i < 200; ++i)
+        dsp.processSample();
+    std::vector<float> second;
+    for (int i = 0; i < 50; ++i)
+        second.push_back (dsp.processSample());
+
+    bool anyDifferent = false;
+    for (int i = 0; i < 50; ++i)
+    {
+        if (std::abs (first[i] - second[i]) > 1e-4f)
+        {
+            anyDifferent = true;
+            break;
+        }
+    }
+    REQUIRE (anyDifferent);
+}
+
+TEST_CASE("Humanize at zero is fully deterministic across notes", "[dsp]")
+{
+    auto params = makeParams (0.3f, 0.5f, 1, 100.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+
+    KarplusStrongDsp dsp;
+    dsp.prepare (44100.0);
+    dsp.setParameters (params);
+
+    dsp.noteOn (440.0f, 1.0f);
+    for (int i = 0; i < 200; ++i)
+        dsp.processSample();
+    std::vector<float> first;
+    for (int i = 0; i < 50; ++i)
+        first.push_back (dsp.processSample());
+
+    dsp.noteOn (440.0f, 1.0f);
+    for (int i = 0; i < 200; ++i)
+        dsp.processSample();
+    std::vector<float> second;
+    for (int i = 0; i < 50; ++i)
+        second.push_back (dsp.processSample());
+
+    for (int i = 0; i < 50; ++i)
+        REQUIRE (std::abs (first[i] - second[i]) < 1e-6f);
+}
+
+TEST_CASE("Drive parameter changes the decay-loop output", "[dsp]")
+{
+    auto params = makeParams (0.3f, 0.5f, 0, 100.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+
+    KarplusStrongDsp clean;
+    clean.prepare (44100.0);
+    clean.setParameters (params);
+    clean.noteOn (440.0f, 1.0f);
+
+    params.drive = 1.0f;
+    KarplusStrongDsp driven;
+    driven.prepare (44100.0);
+    driven.setParameters (params);
+    driven.noteOn (440.0f, 1.0f);
+
+    bool anyDifferent = false;
+    for (int i = 0; i < 2000; ++i)
+    {
+        if (std::abs (clean.processSample() - driven.processSample()) > 1e-4f)
+        {
+            anyDifferent = true;
+            break;
+        }
+    }
+    REQUIRE (anyDifferent);
 }

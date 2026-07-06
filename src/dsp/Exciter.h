@@ -28,6 +28,9 @@ public:
         phase = 0.0;
         burstRemaining = 0;
         toneFilter.reset();
+
+        velvetGrainLength = std::max (1, static_cast<int> (sampleRate / velvetDensity));
+        velvetGrainPos = 0;
     }
 
     void setParameters (const KsParams& newParams)
@@ -39,6 +42,7 @@ public:
         sineHarmonic        = std::max (newParams.sineHarmonic, 1);
         exciterTone         = std::clamp (newParams.exciterTone, -1.0f, 1.0f);
         velExcitationLength = newParams.velExcitationLength;
+        velvetDensity       = std::clamp (newParams.velvetDensity, 50.0f, 8000.0f);
         humanize            = std::clamp (newParams.humanize, 0.0f, 1.0f);
     }
 
@@ -137,6 +141,29 @@ private:
             case 2:
                 return (nextRandomBits() & 1) ? 1.0f : -1.0f;
 
+            case 3:
+            {
+                float progress = 1.0f - static_cast<float> (burstRemaining)
+                                / std::max (noteExcitationLength, 1.0f);
+                float instFreq = frequency * std::pow (ks::chirpSweepRatio, 1.0f - progress);
+                phase += 2.0 * ks::pi * static_cast<double> (instFreq) / sampleRate;
+                if (phase > 2.0 * ks::pi)
+                    phase -= 2.0 * ks::pi;
+                return static_cast<float> (std::sin (phase));
+            }
+
+            case 4:
+            {
+                if (velvetGrainPos == 0)
+                {
+                    velvetPulseIndex = static_cast<int> (nextRandom() * static_cast<float> (velvetGrainLength));
+                    velvetPulseSign = (nextRandomBits() & 1) ? 1.0f : -1.0f;
+                }
+                float out = (velvetGrainPos == velvetPulseIndex) ? velvetPulseSign : 0.0f;
+                velvetGrainPos = (velvetGrainPos + 1) % velvetGrainLength;
+                return out;
+            }
+
             default:
                 return 0.0f;
         }
@@ -175,6 +202,12 @@ private:
     bool  toneFilterIsHighpass = false;
     float velExcitationLength = 0.0f;
     float humanize = 0.0f;
+
+    float velvetDensity = 2000.0f;
+    int   velvetGrainLength = 22;
+    int   velvetGrainPos = 0;
+    int   velvetPulseIndex = 0;
+    float velvetPulseSign = 1.0f;
 
     uint32_t rngState = 123456789u;
 

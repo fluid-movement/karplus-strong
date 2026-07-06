@@ -124,6 +124,35 @@ design decisions that must not regress. Each entry: Symptom → Root cause
 - **Tests:** `Dialed decay time roughly matches time to silence`
   (`tests/test_dsp.cpp`).
 
+### 7. Sympathetic resonance diverged at high Sympathy + Drive + Decay + polyphony
+
+- **Symptom:** With `sympathy`, `drive` near 1, `decay_time` near its max, and
+  many simultaneously-ringing voices, output samples grew without bound
+  (observed reaching >1000 within a few hundred blocks; would eventually hit
+  `inf`/`NaN`).
+- **Root cause:** The cross-voice `sympatheticInput` was added directly into
+  `KsDelayLine::processSample`'s written value, *after* that voice's own
+  `ks::applySaturation(·, drive)` stage — so the injected signal never passed
+  through any nonlinearity. Each voice's own loop is bounded (tanh saturation
+  + `feedbackGain < 1`), but the cross-voice coupling among up to 16 voices,
+  each feeding `sympathy · (sum of the others)` into every other, is a pure
+  *linear* feedback matrix with no such bound — its spectral radius can
+  exceed 1 even though no individual voice's own gain does.
+- **Fix:** `KsDelayLine::processSample` (`src/dsp/KsDelayLine.h`) now passes
+  `sympatheticInput` through `ks::applySaturation(sympatheticInput,
+  ks::sympathySaturationAmount)` (a **fixed** amount, independent of the
+  user's `drive` knob) before adding it. This bounds every value entering the
+  delay buffer regardless of how many voices are bleeding into each other.
+- **Rule:** Any future signal injected into the loop from outside a voice's
+  own `KsParams`-driven processing (i.e. anything analogous to
+  `sympatheticInput`) must be bounded on its own — never assume the
+  destination voice's own `drive` saturation will catch it, since that stage
+  only wraps the voice's *own* feedback content.
+- **Tests:** `Sympathy stays bounded and finite at extreme drive/decay/polyphony
+  settings` (`tests/test_integration.cpp`) — renders 300 blocks at 16 voices,
+  max `drive`/`decay_time`/`sympathy`, and asserts every sample is finite and
+  under a generous bound.
+
 ## Design decisions (do not regress)
 
 ### noteOff is a no-op in Ring mode — extended (not replaced) for Damp mode
@@ -166,7 +195,26 @@ line's sample rate is set in `prepare` (`KsDelayLine.h:15`) from the host's
 processor fills it, everything downstream takes `const KsParams&`. Never
 add positional parameter arguments back to any `setParameters` — adding a
 field to the struct is the whole contract. Keep `KsParams` defaults in sync
-with the APVTS defaults in `PluginProcessor.cpp:6-44`.
+with the APVTS defaults in `PluginProcessor.cpp`.
+
+**Exception**: a value that's a genuine *per-sample signal* rather than a
+slowly-varying dial setting — `excitation` (trap #3) and, since the second
+2026-07 pass, `sympatheticInput` — is a `processSample` **argument**, not a
+`KsParams` field. The test is whether a single voice's `KsParams` snapshot
+could ever contain it: `sympatheticInput` needs every *other* voice's
+freshly-rendered audio, which no per-voice struct can carry, so it has to be
+passed in fresh each sample. The `Sympathy` **knob** itself, by contrast, is
+a processor-level "special" param like `stereo_spread` — see
+`parameters.md`.
+
+### `AllpassFilter` at coefficient 0 is a one-sample delay, not identity
+
+A first-order allpass (`y[n] = -g·x[n] + x[n-1] + g·y[n-1]`) with `g = 0`
+reduces to `y[n] = x[n-1]` — a pure delay, **not** a no-op. `KsDelayLine`
+therefore gates the stiffness allpass behind an explicit `allpassActive`
+flag (`stiffness > 0`), the same pattern as `toneFilterActive` in `Exciter.h`
+— never rely on "the coefficient happens to be zero" to mean bypass for any
+filter structure with feedback/feedforward terms; check the math first.
 
 ### Magic numbers live in `KsCalibration.h`
 

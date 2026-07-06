@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <vector>
 #include <juce_audio_basics/juce_audio_basics.h>
 #include "KarplusStrongDsp.h"
 #include "KsParams.h"
@@ -18,6 +19,8 @@ public:
     void prepare (double sampleRate, int samplesPerBlock)
     {
         dsp.prepare (sampleRate);
+        outputScratch.assign (static_cast<size_t> (samplesPerBlock), 0.0f);
+        sympatheticInput.assign (static_cast<size_t> (samplesPerBlock), 0.0f);
     }
 
     void setParameters (const KsParams& params)
@@ -28,6 +31,14 @@ public:
     void setEnabled (bool shouldBeEnabled) { enabled = shouldBeEnabled; }
 
     void setPan (float newPan) { pan = std::clamp (newPan, -1.0f, 1.0f); }
+
+    void clearOutputScratch (int numSamples)
+    {
+        std::fill (outputScratch.begin(), outputScratch.begin() + numSamples, 0.0f);
+    }
+
+    const std::vector<float>& getOutputScratch() const { return outputScratch; }
+    std::vector<float>& getSympatheticInputBuffer() { return sympatheticInput; }
 
     bool canPlaySound (juce::SynthesiserSound*) override { return enabled; }
 
@@ -56,9 +67,12 @@ public:
 
         for (int smp = 0; smp < numSamples; ++smp)
         {
-            float out = dsp.processSample();
-            outputBuffer.addSample (0, startSample + smp, out * leftGain);
-            outputBuffer.addSample (1, startSample + smp, out * rightGain);
+            int idx = startSample + smp;
+            float out = dsp.processSample (sympatheticInput[static_cast<size_t> (idx)]);
+            outputScratch[static_cast<size_t> (idx)] = out;
+
+            outputBuffer.addSample (0, idx, out * leftGain);
+            outputBuffer.addSample (1, idx, out * rightGain);
 
             if (dsp.isSilent())
             {
@@ -76,4 +90,6 @@ public:
 private:
     bool enabled = true;
     float pan = 0.0f;
+    std::vector<float> outputScratch;
+    std::vector<float> sympatheticInput;
 };

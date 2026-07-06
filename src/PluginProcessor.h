@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vector>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_basics/juce_audio_basics.h>
 #include "dsp/KarplusStrongVoice.h"
@@ -44,6 +45,8 @@ public:
 private:
     juce::Synthesiser synth;
     int currentNumVoices = 0;
+    int maxBlockSize = 0;
+    std::vector<float> voiceMixSum;
 
     std::atomic<float>* excitationParam         = nullptr;
     std::atomic<float>* excitationLengthParam   = nullptr;
@@ -52,22 +55,27 @@ private:
     std::atomic<float>* sineHarmonicParam       = nullptr;
     std::atomic<float>* exciterToneParam        = nullptr;
     std::atomic<float>* velExcitationLengthParam = nullptr;
+    std::atomic<float>* velvetDensityParam      = nullptr;
     std::atomic<float>* decayTimeParam          = nullptr;
     std::atomic<float>* keyTrackParam           = nullptr;
     std::atomic<float>* brightnessParam         = nullptr;
     std::atomic<float>* velBrightnessParam      = nullptr;
     std::atomic<float>* velDecayParam           = nullptr;
     std::atomic<float>* driveParam              = nullptr;
+    std::atomic<float>* stiffnessParam          = nullptr;
     std::atomic<float>* dampModeParam           = nullptr;
     std::atomic<float>* releaseTimeParam        = nullptr;
     std::atomic<float>* humanizeParam           = nullptr;
     std::atomic<float>* outputLevelParam        = nullptr;
     std::atomic<float>* voicesParam             = nullptr;
     std::atomic<float>* stereoSpreadParam       = nullptr;
+    std::atomic<float>* sympathyParam           = nullptr;
 
     void updateVoiceParameters();
     void updateNumVoices (int newNumVoices);
     void updateVoicePans();
+    void clearVoiceOutputScratch (int numSamples);
+    void updateSympatheticBleed (int numSamples);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KarplusStrongProcessor)
 };

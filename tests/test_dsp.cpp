@@ -6,6 +6,7 @@
 #include "KsDelayLine.h"
 #include "CircularBuffer.h"
 #include "OnePoleLowpass.h"
+#include "AllpassFilter.h"
 #include "DcBlocker.h"
 #include "SilenceDetector.h"
 #include "KsCalibration.h"
@@ -873,4 +874,246 @@ TEST_CASE("Drive parameter changes the decay-loop output", "[dsp]")
         }
     }
     REQUIRE (anyDifferent);
+}
+
+TEST_CASE("AllpassFilter preserves sinusoid amplitude", "[primitives]")
+{
+    AllpassFilter ap;
+    ap.setCoefficient (0.5f);
+
+    float freq = 1000.0f;
+    float sr = 44100.0f;
+    float maxOut = 0.0f;
+    double phase = 0.0;
+    for (int i = 0; i < 2000; ++i)
+    {
+        float x = static_cast<float> (std::sin (phase));
+        phase += 2.0 * ks::pi * freq / sr;
+        float y = ap.process (x);
+        if (i > 1000)
+            maxOut = std::max (maxOut, std::abs (y));
+    }
+    REQUIRE (maxOut > 0.9f);
+    REQUIRE (maxOut < 1.1f);
+}
+
+TEST_CASE("AllpassFilter at zero coefficient is a pure one-sample delay", "[primitives]")
+{
+    AllpassFilter ap;
+    ap.setCoefficient (0.0f);
+
+    REQUIRE (ap.process (1.0f) == 0.0f);
+    REQUIRE (ap.process (2.0f) == 1.0f);
+    REQUIRE (ap.process (3.0f) == 2.0f);
+}
+
+TEST_CASE("computeAllpassCoeff is zero at zero stiffness", "[calibration]")
+{
+    REQUIRE (ks::computeAllpassCoeff (0.0f, 100.0f, 0.0f, 44100.0f) == 0.0f);
+}
+
+TEST_CASE("computeAllpassCoeff magnitude grows with stiffness", "[calibration]")
+{
+    float low = std::abs (ks::computeAllpassCoeff (0.3f, 100.0f, 0.0f, 44100.0f));
+    float high = std::abs (ks::computeAllpassCoeff (0.9f, 100.0f, 0.0f, 44100.0f));
+    REQUIRE (high > low);
+}
+
+TEST_CASE("computeAllpassCoeff never exceeds the stability bound", "[calibration]")
+{
+    float c = ks::computeAllpassCoeff (1.0f, 10.0f, 1.0f, 44100.0f);
+    REQUIRE (std::abs (c) <= ks::maxAllpassCoeff);
+}
+
+TEST_CASE("computeAllpassCoeff is flat across the keyboard at zero key-track", "[calibration]")
+{
+    float sr = 44100.0f;
+    float lowNoteDelay = sr / 110.0f;
+    float highNoteDelay = sr / 880.0f;
+    float lowCoeff = ks::computeAllpassCoeff (0.5f, lowNoteDelay, 0.0f, sr);
+    float highCoeff = ks::computeAllpassCoeff (0.5f, highNoteDelay, 0.0f, sr);
+    REQUIRE (std::abs (lowCoeff - highCoeff) < 1e-5f);
+}
+
+TEST_CASE("computeAllpassCoeff varies across the keyboard at full key-track", "[calibration]")
+{
+    float sr = 44100.0f;
+    float lowNoteDelay = sr / 110.0f;
+    float highNoteDelay = sr / 880.0f;
+    float lowCoeff = ks::computeAllpassCoeff (0.5f, lowNoteDelay, 1.0f, sr);
+    float highCoeff = ks::computeAllpassCoeff (0.5f, highNoteDelay, 1.0f, sr);
+    REQUIRE (std::abs (highCoeff) > std::abs (lowCoeff));
+}
+
+TEST_CASE("Stiffness changes the ring-phase output relative to zero stiffness", "[delayline]")
+{
+    auto params = makeParams (0.3f, 0.5f, 0, 100.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+
+    KsDelayLine flat;
+    flat.prepare (44100.0);
+    flat.setParameters (params);
+    flat.noteOn (440.0f, 1.0f, 100.0f);
+
+    params.stiffness = 1.0f;
+    KsDelayLine stiff;
+    stiff.prepare (44100.0);
+    stiff.setParameters (params);
+    stiff.noteOn (440.0f, 1.0f, 100.0f);
+
+    bool anyDifferent = false;
+    for (int i = 0; i < 2000; ++i)
+    {
+        float exc = (i < 100) ? 0.5f : 0.0f;
+        if (std::abs (flat.processSample (exc) - stiff.processSample (exc)) > 1e-5f)
+        {
+            anyDifferent = true;
+            break;
+        }
+    }
+    REQUIRE (anyDifferent);
+}
+
+TEST_CASE("Chirp exciter sweeps from a higher frequency down toward the note frequency", "[exciter]")
+{
+    auto params = makeParams (0.3f, 0.5f, 3, 2000.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+
+    Exciter exc;
+    exc.prepare (44100.0);
+    exc.setParameters (params);
+    exc.noteOn (100.0f, 440.0f, 1.0f);
+
+    auto countZeroCrossings = [&] (int numSamples)
+    {
+        int crossings = 0;
+        float prev = exc.processSample();
+        for (int i = 1; i < numSamples; ++i)
+        {
+            float cur = exc.processSample();
+            if ((prev < 0.0f) != (cur < 0.0f))
+                ++crossings;
+            prev = cur;
+        }
+        return crossings;
+    };
+
+    int earlyCrossings = countZeroCrossings (300);
+    for (int i = 0; i < 1400; ++i)
+        exc.processSample();
+    int lateCrossings = countZeroCrossings (300);
+
+    REQUIRE (earlyCrossings > lateCrossings);
+}
+
+TEST_CASE("Velvet noise exciter produces exactly one pulse per grain", "[exciter]")
+{
+    auto params = makeParams (0.3f, 0.5f, 4, 5000.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+    params.velvetDensity = 1000.0f;
+
+    Exciter exc;
+    exc.prepare (44100.0);
+    exc.setParameters (params);
+    exc.noteOn (100.0f, 440.0f, 1.0f);
+
+    int grainLength = static_cast<int> (44100.0f / 1000.0f);
+    int nonZeroCount = 0;
+    for (int i = 0; i < grainLength; ++i)
+        if (std::abs (exc.processSample()) > 0.0f)
+            ++nonZeroCount;
+
+    REQUIRE (nonZeroCount == 1);
+}
+
+TEST_CASE("KsDelayLine default sympathetic input is zero", "[delayline]")
+{
+    auto params = makeParams (0.3f, 0.5f, 0, 100.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+
+    KsDelayLine a, b;
+    a.prepare (44100.0);
+    b.prepare (44100.0);
+    a.setParameters (params);
+    b.setParameters (params);
+    a.noteOn (440.0f, 1.0f, 100.0f);
+    b.noteOn (440.0f, 1.0f, 100.0f);
+
+    for (int i = 0; i < 2000; ++i)
+    {
+        float exc = (i < 100) ? 0.5f : 0.0f;
+        float outA = a.processSample (exc);
+        float outB = b.processSample (exc, 0.0f);
+        REQUIRE (outA == outB);
+    }
+}
+
+TEST_CASE("KsDelayLine sympathetic input adds energy into the ring-phase loop", "[delayline]")
+{
+    auto params = makeParams (0.05f, 0.0f, 0, 50.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+
+    KsDelayLine quiet;
+    quiet.prepare (44100.0);
+    quiet.setParameters (params);
+    quiet.noteOn (440.0f, 1.0f, 50.0f);
+
+    KsDelayLine fed;
+    fed.prepare (44100.0);
+    fed.setParameters (params);
+    fed.noteOn (440.0f, 1.0f, 50.0f);
+
+    for (int i = 0; i < 50; ++i)
+    {
+        quiet.processSample (0.5f);
+        fed.processSample (0.5f);
+    }
+
+    // burn through the burst and the (very fast) natural decay so "quiet" settles to silence
+    for (int i = 0; i < 44100; ++i)
+    {
+        quiet.processSample (0.0f);
+        fed.processSample (0.0f, 0.01f);
+    }
+
+    float quietMax = 0.0f, fedMax = 0.0f;
+    for (int i = 0; i < 4410; ++i)
+    {
+        quietMax = std::max (quietMax, std::abs (quiet.processSample (0.0f)));
+        fedMax = std::max (fedMax, std::abs (fed.processSample (0.0f, 0.01f)));
+    }
+
+    REQUIRE (fedMax > quietMax);
+}
+
+TEST_CASE("KarplusStrongDsp forwards sympathetic input to the delay line", "[dsp]")
+{
+    auto params = makeParams (0.05f, 0.0f, 0, 50.0f, 0.0f, 0, 0.0f, 0.0f, 1.0f, 0.0f);
+
+    KarplusStrongDsp quiet;
+    quiet.prepare (44100.0);
+    quiet.setParameters (params);
+    quiet.noteOn (440.0f, 1.0f);
+
+    KarplusStrongDsp fed;
+    fed.prepare (44100.0);
+    fed.setParameters (params);
+    fed.noteOn (440.0f, 1.0f);
+
+    for (int i = 0; i < 200; ++i)
+    {
+        quiet.processSample();
+        fed.processSample (0.01f);
+    }
+
+    // burn through the burst and the (very fast) natural decay so "quiet" settles to silence
+    for (int i = 0; i < 44100; ++i)
+    {
+        quiet.processSample();
+        fed.processSample (0.01f);
+    }
+
+    float quietMax = 0.0f, fedMax = 0.0f;
+    for (int i = 0; i < 4410; ++i)
+    {
+        quietMax = std::max (quietMax, std::abs (quiet.processSample()));
+        fedMax = std::max (fedMax, std::abs (fed.processSample (0.01f)));
+    }
+
+    REQUIRE (fedMax > quietMax);
 }

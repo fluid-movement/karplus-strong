@@ -110,6 +110,48 @@ to 0), `pan == -1` gives `(1, 0)`, `pan == 1` gives `(0, 1)`. Output is added
 (not copied) — `addSample` — so polyphonic voices sum in the buffer before
 `processBlock` returns.
 
+Each voice also writes its **own** mono `out` (pre-pan) into
+`outputScratch[idx]` before adding to the buffer, and reads
+`sympatheticInput[idx]` as the second argument to `dsp.processSample(...)` —
+see "Sympathetic resonance" below.
+
+## Sympathetic resonance
+
+Voices are otherwise fully independent (no shared DSP state — see
+Ownership above); sympathetic resonance is the one place that's no longer
+strictly true, implemented entirely at the `PluginProcessor`/`KarplusStrongVoice`
+boundary so `KsDelayLine`/`KarplusStrongDsp` stay JUCE-free and oblivious to
+the existence of other voices:
+
+- Each `KarplusStrongVoice` gets two `std::vector<float>` scratch buffers
+  sized once in `prepare()` (never per-block — the real-time-safety rule
+  still holds): `outputScratch` (this voice's own rendered audio for the
+  current block) and `sympatheticInput` (external per-sample input for the
+  *next* block, described below).
+- `PluginProcessor::processBlock` calls `clearVoiceOutputScratch(numSamples)`
+  **before** `synth.renderNextBlock(...)`, zeroing every one of the 16
+  preallocated voices' scratch buffers. This matters: a voice that isn't
+  currently playing a note never gets its `renderNextBlock` called by JUCE at
+  all, so without the clear its scratch buffer would still hold stale audio
+  from the last block it *was* playing, which would otherwise leak into the
+  bleed sum forever.
+- After `renderNextBlock` returns, `updateSympatheticBleed(numSamples)` sums
+  every voice's `outputScratch` into a running `voiceMixSum`, then for each
+  voice computes `sympathy · (voiceMixSum[s] - ownScratch[s])` — "everyone
+  else's sum" via one subtraction per sample, not a recomputed pairwise sum —
+  and writes that into the voice's `sympatheticInput` buffer.
+- That buffer is read on the **following** block (`dsp.processSample
+  (sympatheticInput[idx])` inside `renderNextBlock`), so cross-voice bleed
+  has exactly one block of latency (a few ms at typical buffer sizes) — the
+  same kind of latency FDN reverbs and other block-based cross-feedback
+  structures already accept, and unavoidable given JUCE renders each voice's
+  full sub-block before moving to the next.
+- Disabled-but-still-ringing voices (see Voice pool above) participate
+  normally — bleed doesn't distinguish `enabled` from ringing, only from
+  *silent*.
+- The saturation applied to `sympatheticInput` inside `KsDelayLine` is
+  load-bearing for stability, not optional — see `gotchas.md` trap #7.
+
 ## isSilent trigger
 
 `KarplusStrongDsp::isSilent` — `src/dsp/KarplusStrongDsp.h:40` — delegates to

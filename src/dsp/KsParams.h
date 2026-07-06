@@ -18,5 +18,7 @@ struct KsParams
     int   dampMode           = 0;
     float releaseTime        = 0.3f;
     float humanize           = 0.0f;
+    float stiffness          = 0.0f;
+    float velvetDensity      = 2000.0f;
     float outputLevel        = 0.8f;
 };

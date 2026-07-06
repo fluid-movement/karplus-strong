@@ -38,35 +38,44 @@ chain) and `KsCalibration.h` (constants + pure tuning functions). See
 
 ## MIDI → audio path (one block)
 
-1. Host calls `processBlock(buffer, midi)` — `src/PluginProcessor.cpp:75`
+1. Host calls `processBlock(buffer, midi)` — `src/PluginProcessor.cpp`
 2. `buffer.clear()`, then `updateNumVoices` (enabled-flag toggle only, no
    allocation)
 3. `updateVoiceParameters()` builds one `KsParams` from the cached atomics and
    pushes it to every voice; `updateVoicePans()` computes each voice's
    `stereo_spread`-derived pan the same way
-4. `synth.renderNextBlock(buffer, midi, 0, N)`
-5. Synthesiser splits block at MIDI event positions, calls `noteOn`/`noteOff`
+4. `clearVoiceOutputScratch(numSamples)` zeroes every voice's `outputScratch`
+   buffer (see `voice-and-synth.md` — Sympathetic resonance)
+5. `synth.renderNextBlock(buffer, midi, 0, N)`
+6. Synthesiser splits block at MIDI event positions, calls `noteOn`/`noteOff`
    (JUCE internals — see `voice-and-synth.md` for our hooks)
-6. For each sub-block, `renderVoices()` calls each voice's `renderNextBlock`
-7. Each `KarplusStrongVoice::renderNextBlock` pulls `dsp.processSample()` per
-   sample and adds it to both channels scaled by that voice's pan gains
-   (`src/dsp/KarplusStrongVoice.h`) — at the default `stereo_spread == 0` both
-   gains are `1.0`, identical to the original mono-copy behavior
-8. Voice calls `clearCurrentNote()` + breaks when `dsp.isSilent()`
+7. For each sub-block, `renderVoices()` calls each voice's `renderNextBlock`
+8. Each `KarplusStrongVoice::renderNextBlock` pulls
+   `dsp.processSample(sympatheticInput[idx])` per sample (the bleed value
+   computed from the *previous* block), stores its own mono output into
+   `outputScratch[idx]`, and adds it to both channels scaled by that voice's
+   pan gains — at the default `stereo_spread == 0` both gains are `1.0`,
+   identical to the original mono-copy behavior
+9. Voice calls `clearCurrentNote()` + breaks when `dsp.isSilent()`
+10. Back in `processBlock`, `updateSympatheticBleed(numSamples)` sums every
+    voice's freshly-written `outputScratch` and writes each voice's
+    "everyone else's sum, scaled by `Sympathy`" into its `sympatheticInput`
+    buffer for step 8 to consume **next** block
 
 ## Parameter → DSP binding
 
 `PluginProcessor` reads the cached APVTS atomics each block, fills a
-`KsParams`, and calls `voice->setParameters(params)` —
-`src/PluginProcessor.cpp:84-101`. The struct is forwarded by const ref:
+`KsParams`, and calls `voice->setParameters(params)` — `updateVoiceParameters()`
+in `src/PluginProcessor.cpp`. The struct is forwarded by const ref:
 Voice → `KarplusStrongDsp` → `Exciter` + `KsDelayLine`. Each consumer reads
 only the fields it owns. See `parameters.md` for the per-param mapping.
 
 ## Real-time-safety rules
 
 - No allocation, locks, or buffer resizing in `processBlock` or anything it
-  calls. Voices are preallocated (`maxVoices = 16`,
-  `src/PluginProcessor.h:10`); buffers are sized once in `prepare`.
+  calls. Voices are preallocated (`maxVoices = 16`, `src/PluginProcessor.h`);
+  buffers (including the sympathetic-resonance scratch buffers) are sized
+  once in `prepare`.
 - Parameter access is via cached `std::atomic<float>*` — no per-block string
   lookups.
 

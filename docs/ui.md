@@ -35,13 +35,16 @@ addControl (Group::delayLine, "my_param", "My Param");
 `layoutGroup` wraps automatically to a new row once a group's controls no
 longer fit on one line, so adding controls doesn't require manually
 rebalancing column counts — it only needs enough window height for the extra
-row(s). If a group grows tall enough to clip, increase `setSize` (`:36`).
+row(s). If a group grows tall enough to clip, increase `setSize`.
 
 ## Window & layout
 
-- Size: **800 × 420** — `src/PluginEditor.cpp:36`.
+- Size: **800 × 460** — `src/PluginEditor.cpp`.
 - Background: `0xff1a1a2e`.
-- Title: "Karplus-Strong", centered, 18pt bold, top 30 px.
+- Top strip (30px): title "Karplus-Strong" (centered, 18pt bold) on the left,
+  a **Preset** label + `ComboBox` (`presetLabel`/`presetCombo`) carved out of
+  the right 220px — not an APVTS-attached `Control`, just a plain combo whose
+  `onChange` calls `applyPreset(processorRef.apvts, ...)` from `Presets.h`.
 - Two `GroupComponent` panels: **Exciter** (left, width 320, column width 70)
   and **Delay Line** (right, remaining width, column width 58). Each wraps
   into multiple rows now that they hold more than one row's worth of
@@ -60,6 +63,7 @@ row(s). If a group grows tall enough to clip, increase `setSize` (`:36`).
 | Exciter | `sine_harmonic` | Sine Harm | rotary |
 | Exciter | `exciter_tone` | Exc Tone | rotary |
 | Exciter | `vel_excitation_length` | Vel->Length | rotary |
+| Exciter | `velvet_density` | Velvet Dens | rotary |
 | Delay Line | `decay_time` | Decay Time | rotary |
 | Delay Line | `brightness` | Brightness | rotary |
 | Delay Line | `vel_brightness` | Vel->Bright | rotary |
@@ -68,10 +72,14 @@ row(s). If a group grows tall enough to clip, increase `setSize` (`:36`).
 | Delay Line | `voices` | Voices | rotary |
 | Delay Line | `key_track` | Key Track | rotary |
 | Delay Line | `drive` | Drive | rotary |
+| Delay Line | `stiffness` | Stiffness | rotary |
 | Delay Line | `damp_mode` | Damp Mode | ComboBox (from choices) |
 | Delay Line | `release_time` | Release | rotary |
 | Delay Line | `humanize` | Humanize | rotary |
 | Delay Line | `stereo_spread` | Stereo | rotary |
+| Delay Line | `sympathy` | Sympathy | rotary |
+
+(The preset selector is a separate, non-`Control` combo — see Window & layout above.)
 
 ## Styling
 

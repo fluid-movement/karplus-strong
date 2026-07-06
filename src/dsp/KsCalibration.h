@@ -29,6 +29,15 @@ namespace ks
 
     constexpr float exciterFilterDeadzone = 0.01f;
 
+    constexpr float maxAllpassCoeff = 0.7f;
+    constexpr float minAllpassRegisterScale = 0.25f;
+    constexpr float maxAllpassRegisterScale = 4.0f;
+
+    constexpr float chirpSweepRatio = 6.0f;
+
+    constexpr float sympathyMaxGain = 0.15f;
+    constexpr float sympathySaturationAmount = 1.0f;
+
     inline float computeCutoffHz (float brightness)
     {
         return minCutoffHz + std::clamp (brightness, 0.0f, 1.0f) * cutoffRangeHz;
@@ -61,5 +70,15 @@ namespace ks
 
         float gain = std::exp (-ln1000 * effDelay / (decayTime * sampleRate));
         return std::clamp (gain * lowpassLossComp, 0.0f, maxFeedbackGain);
+    }
+
+    inline float computeAllpassCoeff (float stiffness, float delaySamples, float keyTrack, float sampleRate)
+    {
+        float amt = std::clamp (stiffness, 0.0f, 1.0f);
+        float refDelay = sampleRate / refFrequencyHz;
+        float effDelay = refDelay + keyTrack * (delaySamples - refDelay);
+
+        float registerScale = std::clamp (refDelay / effDelay, minAllpassRegisterScale, maxAllpassRegisterScale);
+        return std::clamp (amt * maxAllpassCoeff * registerScale, -maxAllpassCoeff, maxAllpassCoeff);
     }
 }

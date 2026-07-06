@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "Presets.h"
 
 KarplusStrongEditor::KarplusStrongEditor (KarplusStrongProcessor& p)
     : juce::AudioProcessorEditor (&p), processorRef (p)
@@ -8,6 +9,28 @@ KarplusStrongEditor::KarplusStrongEditor (KarplusStrongProcessor& p)
     titleLabel.setFont (juce::Font (juce::FontOptions (18.0f, juce::Font::bold)));
     titleLabel.setColour (juce::Label::textColourId, juce::Colour (0xffeeeeee));
     addAndMakeVisible (titleLabel);
+
+    presetLabel.setText ("Preset", juce::dontSendNotification);
+    presetLabel.setJustificationType (juce::Justification::centredRight);
+    presetLabel.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
+    presetLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcccccc));
+    addAndMakeVisible (presetLabel);
+
+    presetCombo.addItem ("Select Preset...", 1);
+    {
+        int itemId = 2;
+        for (auto& preset : getFactoryPresets())
+            presetCombo.addItem (preset.name, itemId++);
+    }
+    presetCombo.setSelectedId (1, juce::dontSendNotification);
+    presetCombo.onChange = [this]
+    {
+        auto& presets = getFactoryPresets();
+        int index = presetCombo.getSelectedId() - 2;
+        if (index >= 0 && index < static_cast<int> (presets.size()))
+            applyPreset (processorRef.apvts, presets[static_cast<size_t> (index)]);
+    };
+    addAndMakeVisible (presetCombo);
 
     auto setupGroup = [this] (juce::GroupComponent& group, const juce::String& text)
     {
@@ -27,6 +50,7 @@ KarplusStrongEditor::KarplusStrongEditor (KarplusStrongProcessor& p)
     addControl (Group::exciter, "sine_harmonic", "Sine Harm");
     addControl (Group::exciter, "exciter_tone", "Exc Tone");
     addControl (Group::exciter, "vel_excitation_length", "Vel->Length");
+    addControl (Group::exciter, "velvet_density", "Velvet Dens");
 
     addControl (Group::delayLine, "decay_time", "Decay Time");
     addControl (Group::delayLine, "brightness", "Brightness");
@@ -36,12 +60,14 @@ KarplusStrongEditor::KarplusStrongEditor (KarplusStrongProcessor& p)
     addControl (Group::delayLine, "voices", "Voices");
     addControl (Group::delayLine, "key_track", "Key Track");
     addControl (Group::delayLine, "drive", "Drive");
+    addControl (Group::delayLine, "stiffness", "Stiffness");
     addControl (Group::delayLine, "damp_mode", "Damp Mode");
     addControl (Group::delayLine, "release_time", "Release");
     addControl (Group::delayLine, "humanize", "Humanize");
     addControl (Group::delayLine, "stereo_spread", "Stereo");
+    addControl (Group::delayLine, "sympathy", "Sympathy");
 
-    setSize (800, 420);
+    setSize (800, 460);
 }
 
 void KarplusStrongEditor::addControl (Group group, const juce::String& paramId, const juce::String& labelText)
@@ -82,7 +108,13 @@ void KarplusStrongEditor::paint (juce::Graphics& g)
 void KarplusStrongEditor::resized()
 {
     auto bounds = getLocalBounds();
-    titleLabel.setBounds (bounds.removeFromTop (30).reduced (0, 4));
+    auto topStrip = bounds.removeFromTop (30);
+
+    auto presetArea = topStrip.removeFromRight (220).reduced (4);
+    presetLabel.setBounds (presetArea.removeFromLeft (50));
+    presetCombo.setBounds (presetArea);
+
+    titleLabel.setBounds (topStrip.reduced (0, 4));
 
     auto area = bounds.reduced (10);
     int gap = 8;

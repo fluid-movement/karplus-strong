@@ -15,26 +15,29 @@ into the two processing classes.
 | `KsCalibration.h` | namespace `ks`: named constants + pure functions `computeCutoffHz` / `computeFeedbackGain` |
 | `CircularBuffer.h` | delay buffer: `prepare(size)`, `clear()`, `write(x)`, `readDelayed(d)` (linearly-interpolated fractional read, clamped `[1, size-1]`) |
 | `OnePoleLowpass.h` | RC lowpass; `setCutoff` computes alpha once (not per sample) |
+| `AllpassFilter.h` | first-order allpass (`y[n] = -g·x[n] + x[n-1] + g·y[n-1]`); unity gain, phase-only — powers the stiffness/dispersion effect |
 | `DcBlocker.h` | one-pole DC blocker (~`ks::dcBlockerHz` = 5 Hz) |
 | `SilenceDetector.h` | peak tracker with halving window + min-samples guard |
-| `Exciter.h` | burst generation (noise/sine/dust) + pick-model routing |
+| `Exciter.h` | burst generation (noise/sine/dust/chirp/velvet) + pick-model routing |
 | `KsDelayLine.h` | the KS feedback loop topology |
 | `KarplusStrongDsp.h` | facade: one Exciter + one KsDelayLine |
 
 ## Signal flow per sample
 
 ```
-KarplusStrongDsp::processSample()           src/dsp/KarplusStrongDsp.h:45
+KarplusStrongDsp::processSample(sympatheticInput = 0)   src/dsp/KarplusStrongDsp.h
   │
   ├── exciter.isActive()? ──► exciter.processSample()  (nonzero during burst)
   │                            else 0.0f
   │
   ▼
-delayLine.processSample(excitation)         src/dsp/KsDelayLine.h:60
+delayLine.processSample(excitation, sympatheticInput)   src/dsp/KsDelayLine.h
   │
   ├── delayed = buffer.readDelayed(delaySamples)          (linear-interpolated)
   ├── if excitation != 0:  input = excitation                                (burst phase)
-  │   else:                input = saturate(dcBlocker(lowpass(delayed)), drive) * feedbackGain  (ring phase)
+  │   else:                filtered = lowpass(delayed); if stiffness active: filtered = allpass(filtered)
+  │                         input = saturate(dcBlocker(filtered), drive) * feedbackGain  (ring phase)
+  ├── if sympatheticInput != 0: input += saturate(sympatheticInput, ks::sympathySaturationAmount)
   ├── if damping (Damp mode, after noteOff): input *= releaseGain; releaseGain *= releaseCoeff
   ├── buffer.write(input)
   ├── output = delayed * velocity * params.outputLevel * (releaseGain if damping)
@@ -45,6 +48,11 @@ delayLine.processSample(excitation)         src/dsp/KsDelayLine.h:60
 `KarplusStrongDsp::noteOn` applies the `humanize` detune (see below) to `frequency`
 before deriving `delaySamp` and calling into `exciter`/`delayLine`, so the
 exciter's pitch tracking and the string's tuning always agree.
+
+`sympatheticInput` is a per-sample **argument**, not a `KsParams` field — see
+the Sympathetic resonance section below for why, and `docs/parameters.md` for
+where the `Sympathy` knob itself lives (it's a `stereo_spread`-style
+processor-level concern, not part of `KsParams` either).
 
 ## Calibration — `src/dsp/KsCalibration.h`
 
@@ -57,6 +65,7 @@ The two pure functions are directly unit-tested (`tests/test_dsp.cpp`,
 |---|---|
 | `computeCutoffHz(brightness)` | `200 + clamp(brightness, 0, 1) * 11800` |
 | `computeFeedbackGain(decayTime, freq, delaySamples, keyTrack, cutoffHz, sr)` | `clamp(exp(-ln1000·effDelay/(decayTime·sr)) · sqrt(1+(freq/cutoffHz)²), 0, 0.99999)` where `effDelay = refDelay + keyTrack·(delaySamples − refDelay)`, `refDelay = sr/440` |
+| `computeAllpassCoeff(stiffness, delaySamples, keyTrack, sr)` | `clamp(stiffness · maxAllpassCoeff · registerScale, -maxAllpassCoeff, maxAllpassCoeff)` where `registerScale = clamp(refDelay/effDelay, 0.25, 4)`, reusing the same `refDelay`/`effDelay` as `computeFeedbackGain` — at `keyTrack=0` the coefficient is flat across the keyboard; at `keyTrack=1` higher notes get more dispersion (matches how real stiff strings show more inharmonicity on shorter/higher strings) |
 
 The `sqrt(1+(f/fc)²)` factor cancels the lowpass's loss at the fundamental so
 dialed decay seconds match perceived decay (see `gotchas.md` trap #6). The DC
@@ -77,6 +86,8 @@ Two more pure helpers support the drive/damp features, both `[calibration]`-tagg
 
 Humanize jitter constants: `humanizeMaxDetune` (±2% frequency), `humanizeMaxBrightness` (±0.1 on the 0–1 brightness scale), `humanizeMaxPickJitter` (±0.05 on pick position). All are `humanize` (0–1) scaled and applied via a per-class xorshift RNG seeded once at construction (not reseeded per note) — each `noteOn` draws fresh jitter without needing new state.
 
+Sympathetic-resonance safety constants: `sympathyMaxGain` (0.15 — caps the `Sympathy` 0–1 knob's effective injection well below unity coupled-loop-gain even at max polyphony/drive/decay) and `sympathySaturationAmount` (1.0 — the fixed `applySaturation` amount always applied to the injected cross-voice signal, independent of the `Drive` knob; see the Sympathetic resonance section below for why this is load-bearing, not optional). `chirpSweepRatio` (6.0) sets how many times above the fundamental the Chirp exciter starts its downward sweep.
+
 ## KarplusStrongDsp — `src/dsp/KarplusStrongDsp.h`
 
 Facade composing `Exciter` + `KsDelayLine`. No JUCE dependency.
@@ -89,7 +100,7 @@ Facade composing `Exciter` + `KsDelayLine`. No JUCE dependency.
 | `noteOn(freq, velocity)` | `:28` | applies `humanize` detune to `freq`; `delaySamp = delayLine.getSampleRate() / freq`; seed exciter, init delay line |
 | `noteOff(allowTailOff)` | `:35` | forwards to `delayLine.noteOff` — no-op unless Damp mode (see below and gotchas) |
 | `isSilent()` | `:40` | returns `delayLine.isSilent()` |
-| `processSample()` | `:45` | pull excitation (0 after burst), feed to delay line, return output |
+| `processSample(sympatheticInput = 0)` | `:45` | pull excitation (0 after burst), feed to delay line along with `sympatheticInput`, return output |
 
 Key: `noteOn` computes delay length from the **delay line's** sample rate
 (not a hardcoded constant). Don't reintroduce `44100.0`.
@@ -108,6 +119,8 @@ tone filter.
 | 0 | Noise | xorshift32 RNG → `[-1, 1]` |
 | 1 | Sine | `sin(phase)`, phase increments by `2π · frequency · sineHarmonic / sampleRate` — tracks the played note, `sineHarmonic` (1–8) selects which harmonic |
 | 2 | Dust | xorshift32 → `±1` impulse |
+| 3 | Chirp | `sin(phase)` with a time-varying instantaneous frequency: `instFreq = frequency · chirpSweepRatio^(1 - progress)`, `progress = 1 - burstRemaining/noteExcitationLength`. Sweeps from `frequency·6` down to `frequency` over the burst — no new param, reuses `excitation_length` for duration and the existing pitch tracking for range |
+| 4 | Velvet | Sparse velvet-noise impulses: time is divided into grains of `sampleRate/velvetDensity` samples; each grain emits exactly one pseudo-random-position, pseudo-random-sign `±1` pulse, zero elsewhere. `velvetDensity` (new param, pulses/sec) controls grain length; recomputed in `reset()` |
 
 The generated sample is then passed through the tone filter (see below) before
 pick-model routing.
@@ -165,21 +178,63 @@ samples**, passed in via `noteOn(delaySamples, frequency, velocity)` from
 
 ## KsDelayLine — `src/dsp/KsDelayLine.h`
 
-The KS feedback loop: `CircularBuffer` → `OnePoleLowpass` → `DcBlocker` →
-saturation → feedback gain. Holds a `KsParams` copy, a `SilenceDetector`, and
-the per-note state (`velocity`, `delaySamples`, `feedbackGain`, `cutoffHz`,
-damping envelope).
+The KS feedback loop: `CircularBuffer` → `OnePoleLowpass` → `AllpassFilter`
+(if stiffness active) → `DcBlocker` → saturation → feedback gain →
+sympathetic input. Holds a `KsParams` copy, a `SilenceDetector`, and the
+per-note state (`velocity`, `delaySamples`, `feedbackGain`, `cutoffHz`,
+allpass coefficient, damping envelope).
 
 | Method | Line | Notes |
 |---|---|---|
 | `prepare(sampleRate)` | `:15` | sizes buffer to `sampleRate * ks::maxDelaySeconds`; prepares DC blocker |
 | `getSampleRate()` | `:22` | used by `KarplusStrongDsp::noteOn` |
-| `reset()` | `:24` | clears buffer, filter states, silence detector, damping envelope |
+| `reset()` | `:24` | clears buffer, filter states (including allpass), silence detector, damping envelope |
 | `setParameters(const KsParams&)` | `:32` | stores the struct |
-| `noteOn(freq, velocity, excLen)` | `:37` | velocity mod → `ks::computeCutoffHz`/`ks::computeFeedbackGain`; jitters brightness by `humanize` first; arms the silence detector with `delaySamples + excLen + ks::silenceGuardSamples` |
+| `noteOn(freq, velocity, excLen)` | `:37` | velocity mod → `ks::computeCutoffHz`/`ks::computeFeedbackGain`; jitters brightness by `humanize` first; sets the allpass coefficient via `ks::computeAllpassCoeff` if `stiffness > 0`; arms the silence detector with `delaySamples + excLen + ks::silenceGuardSamples` |
 | `noteOff(allowTailOff)` | `:56` | no-op in Ring mode (`dampMode == 0`, default — unchanged behavior). In Damp mode (`dampMode == 1`) with `allowTailOff`, arms a release envelope: `releaseGain = 1`, `releaseCoeff = ks::computeReleaseCoeff(releaseTime, sampleRate)` |
 | `isSilent()` | `:58` | delegates to `SilenceDetector` |
-| `processSample(excitation)` | `:60` | the core loop (see signal flow above); ring-phase input passes through `ks::applySaturation(·, drive)`; while damping, both the feedback input and the output are multiplied by the decaying `releaseGain` |
+| `processSample(excitation, sympatheticInput = 0)` | `:60` | the core loop (see signal flow above); ring-phase input passes through the allpass (if active) and `ks::applySaturation(·, drive)`; `sympatheticInput` (if nonzero) is separately saturated with a fixed `ks::sympathySaturationAmount` and added; while damping, both the feedback input and the output are multiplied by the decaying `releaseGain` |
+
+### Stiffness / inharmonicity dispersion
+
+`stiffness` (0–1, default 0) drives a single `AllpassFilter` inserted between
+the lowpass and the DC blocker in the ring phase. At `stiffness == 0` the
+filter is skipped entirely (`allpassActive = false`), so the default sound is
+bit-identical to before this feature — **not** just "coefficient happens to be
+zero": a first-order allpass with coefficient 0 reduces to `y[n] = x[n-1]`, a
+pure one-sample delay, not identity, so the bypass has to be an explicit
+branch (see `AllpassFilter::process`). The coefficient comes from
+`ks::computeAllpassCoeff`, which reuses `keyTrack` the same way
+`computeFeedbackGain` already does (see Calibration above). Because an
+allpass is unity-gain by construction, no `feedbackGain` recompensation is
+needed the way the lowpass required (trap #6 in `gotchas.md`) — stiffness
+only changes phase, not decay time.
+
+### Sympathetic resonance
+
+`sympatheticInput` is deliberately a `processSample` **argument**, not a
+`KsParams` field — same category as `excitation` (trap #3 in gotchas.md): a
+different value every sample, computable only by the processor (it needs
+every other voice's freshly-rendered audio, which no per-voice `KsParams`
+snapshot could ever contain). It's injected unconditionally (burst and ring
+phase alike — a sympathetically-coupled string keeps picking up neighbor
+energy even mid-pluck) and, when nonzero, is passed through
+`ks::applySaturation(sympatheticInput, ks::sympathySaturationAmount)` before
+being added. That saturation call is **load-bearing, not optional**: the
+injected signal bypasses each voice's own `drive`-controlled saturation
+entirely (it's added after that stage), so without its own fixed bound the
+cross-voice coupling is pure linear feedback between up to 16 voices with no
+limiter — verified experimentally to diverge (samples reaching >1000 within
+a few hundred blocks) at high `Sympathy` + `Drive` + `decay_time` + polyphony
+before this fix was added. With the fixed saturation, per-sample writes are
+bounded regardless of how many voices are bleeding into each other; see
+`tests/test_integration.cpp` ("Sympathy stays bounded and finite…") for the
+regression test. The `Sympathy` knob itself (0–1) is read once per block in
+`PluginProcessor::updateSympatheticBleed` and folded into the per-sample
+`sympatheticInput` value there — `KsDelayLine`/`KarplusStrongDsp` never know
+what "Sympathy" is, they just add a number. See `docs/architecture.md` and
+`docs/voice-and-synth.md` for the per-voice scratch-buffer/one-block-latency
+mechanics that produce that number.
 
 ### Ring vs. Damp mode
 

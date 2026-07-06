@@ -41,6 +41,8 @@ private:
 
     juce::GroupComponent exciterGroup, delayLineGroup;
     juce::Label titleLabel;
+    juce::Label presetLabel;
+    juce::ComboBox presetCombo;
 
     std::vector<std::unique_ptr<Control>> controls;
 

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include "CircularBuffer.h"
 #include "OnePoleLowpass.h"
+#include "AllpassFilter.h"
 #include "DcBlocker.h"
 #include "SilenceDetector.h"
 #include "KsCalibration.h"
@@ -26,6 +27,7 @@ public:
     {
         buffer.clear();
         lowpass.reset();
+        allpass.reset();
         dcBlocker.reset();
         silence.reset();
         damping = false;
@@ -57,6 +59,12 @@ public:
                                                 cutoffHz, static_cast<float> (sampleRate));
 
         lowpass.setCutoff (cutoffHz, static_cast<float> (sampleRate));
+
+        allpassActive = params.stiffness > 0.0f;
+        if (allpassActive)
+            allpass.setCoefficient (ks::computeAllpassCoeff (params.stiffness, delaySamples,
+                                                             params.keyTrack, static_cast<float> (sampleRate)));
+
         silence.noteOn (static_cast<int> (delaySamples) + static_cast<int> (excitationLength)
                         + ks::silenceGuardSamples);
     }
@@ -73,7 +81,7 @@ public:
 
     bool isSilent() const { return silence.isSilent(); }
 
-    float processSample (float excitation)
+    float processSample (float excitation, float sympatheticInput = 0.0f)
     {
         float delayed = buffer.readDelayed (delaySamples);
 
@@ -81,8 +89,15 @@ public:
         if (excitation != 0.0f)
             input = excitation;
         else
-            input = ks::applySaturation (dcBlocker.process (lowpass.process (delayed)), params.drive)
-                  * feedbackGain;
+        {
+            float filtered = lowpass.process (delayed);
+            if (allpassActive)
+                filtered = allpass.process (filtered);
+            input = ks::applySaturation (dcBlocker.process (filtered), params.drive) * feedbackGain;
+        }
+
+        if (sympatheticInput != 0.0f)
+            input += ks::applySaturation (sympatheticInput, ks::sympathySaturationAmount);
 
         if (damping)
         {
@@ -120,11 +135,14 @@ private:
     float  releaseGain = 1.0f;
     float  releaseCoeff = 1.0f;
 
+    bool   allpassActive = false;
+
     uint32_t rngState = 555555555u;
 
     KsParams params;
     CircularBuffer buffer;
     OnePoleLowpass lowpass;
+    AllpassFilter allpass;
     DcBlocker dcBlocker;
     SilenceDetector silence;
 };

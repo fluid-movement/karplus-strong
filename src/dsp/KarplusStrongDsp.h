@@ -53,10 +53,10 @@ public:
         return delayLine.isSilent();
     }
 
-    float processSample()
+    float processSample (float sympatheticInput = 0.0f)
     {
         float excitation = exciter.isActive() ? exciter.processSample() : 0.0f;
-        return delayLine.processSample (excitation);
+        return delayLine.processSample (excitation, sympatheticInput);
     }
 
     Exciter exciter;

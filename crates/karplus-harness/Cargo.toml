@@ -1,0 +1,15 @@
+[package]
+name = "karplus-harness"
+description = "Renders the string, measures it, and checks scenarios."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+karplus-core.workspace = true
+# Used unchanged from Fathom: the measurement library.
+fathom-analysis.workspace = true
+fathom-core.workspace = true

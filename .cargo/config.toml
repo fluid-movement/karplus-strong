@@ -1,0 +1,4 @@
+# Fathom is a private repository. The git CLI picks up whatever credentials
+# the machine already has for GitHub; cargo's built-in git does not.
+[net]
+git-fetch-with-cli = true

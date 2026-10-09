@@ -1,0 +1,11 @@
+# Pinned so the host build, the embedded build and CI agree. Golden values and
+# bit-identical host/target output are only meaningful against a known
+# compiler.
+[toolchain]
+channel = "stable"
+# `llvm-tools` carries `llvm-size`, which the size budget reads the target
+# build's sections with. Pinned here rather than installed by `just setup-rust`
+# alone, because CI never runs that recipe — it lets rustup act on this file
+# and nothing else, so anything missing from this line is missing there.
+components = ["rustfmt", "clippy", "llvm-tools"]
+targets = ["thumbv7em-none-eabihf"]

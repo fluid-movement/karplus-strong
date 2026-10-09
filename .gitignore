@@ -1,7 +1,15 @@
-JUCE/
-build/
-build_tests/
+/target
+CLAUDE.local.md
 .DS_Store
-*.xcodeproj
-DerivedData/
-_deps/
+*.wav
+/listening/out
+
+# Anything `just sdk` downloads: the Rack SDK.
+/.tooling
+
+# VCV plugin build output.
+/targets/vcv/build
+/targets/vcv/plugin.so
+/targets/vcv/plugin.dylib
+/targets/vcv/plugin.dll
+/targets/vcv/dist

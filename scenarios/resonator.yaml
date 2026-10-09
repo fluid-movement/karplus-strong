@@ -1,0 +1,16 @@
+name: resonator
+description: >
+  No plucks: full-scale noise at the audio input and the string at its
+  longest. A loop this close to unity gain rings up to tens of thousands
+  times its input at resonance; it must ring at the note and stay inside
+  full scale.
+pitch: G3
+duration: 3s
+params: { decay: 1.0 }
+plucks: []
+audio_in: { noise: 1.0 }
+analysis: { from: 1s, to: 3s }
+assert:
+  pitch_error_cents: { min: -1.5, max: 1.5 }
+  peak: { min: 0.3, max: 1.0 }
+  non_finite_samples: { max: 0 }

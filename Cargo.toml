@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/karplus-core",
     "crates/karplus-harness",
+    "crates/karplus-ffi",
 ]
 
 [workspace.package]
@@ -19,6 +20,7 @@ karplus-core = { path = "crates/karplus-core" }
 # (docs/fathom-reuse.md): use Fathom's primitives as they are, change nothing
 # on that side, and write down where they fit and where they do not.
 fathom-core = { git = "https://github.com/fluid-movement/Fathom", rev = "be4d00b9fc7a777a2ba4f20b052d68915c6b43f0" }
+fathom-harness = { git = "https://github.com/fluid-movement/Fathom", rev = "be4d00b9fc7a777a2ba4f20b052d68915c6b43f0" }
 fathom-analysis = { git = "https://github.com/fluid-movement/Fathom", rev = "be4d00b9fc7a777a2ba4f20b052d68915c6b43f0" }
 
 # Tests run optimised: every one of them renders seconds of audio, and an

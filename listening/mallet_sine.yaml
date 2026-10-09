@@ -1,0 +1,12 @@
+name: mallet_sine
+description: >
+  The sine exciter through the tone filter, on the second harmonic: soft and
+  pitched, closer to a struck bar than a plucked string.
+pitch: C4
+duration: 4s
+exciter: sine
+harmonic: 2
+params: { tone: 0.5, length: 0.8, decay: 0.6 }
+plucks: [0s, 1s, 2s]
+assert:
+  non_finite_samples: { max: 0 }

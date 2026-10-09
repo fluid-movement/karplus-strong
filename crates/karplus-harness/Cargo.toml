@@ -13,3 +13,10 @@ karplus-core.workspace = true
 # Used unchanged from Fathom: the measurement library.
 fathom-analysis.workspace = true
 fathom-core.workspace = true
+# The generic half of Fathom's scenario runner, used as it is: durations,
+# note names, automation curves, assertion bounds and the WAV writer. The
+# Scenario type itself is Fathom's oscillator and cannot be (docs/fathom-reuse.md).
+fathom-harness.workspace = true
+serde = { version = "1", features = ["derive"] }
+# The same YAML crate Fathom's scenarios are parsed with.
+serde_yaml = "0.9"

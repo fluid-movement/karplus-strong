@@ -1,0 +1,13 @@
+name: drive_full
+description: >
+  DRIVE fully up: the burst hits the loop eight times harder into a tanh.
+  Louder and squarer, but in tune and inside full scale.
+pitch: E2
+duration: 3s
+params: { drive: 1.0 }
+analysis: { from: 50ms, to: 2s }
+assert:
+  pitch_error_cents: { min: -2.0, max: 2.0 }
+  peak: { min: 0.25, max: 1.0 }
+  dc_offset_dbfs: { max: -45 }
+  non_finite_samples: { max: 0 }

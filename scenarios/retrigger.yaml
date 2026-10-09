@@ -1,0 +1,13 @@
+name: retrigger
+description: >
+  Twenty plucks a second for a second, at full drive. Each new burst adds
+  to a string still ringing from the last; the loop's shaper is what keeps
+  that from piling up.
+pitch: A2
+duration: 1200ms
+params: { drive: 1.0, decay: 1.0 }
+plucks: [0ms, 50ms, 100ms, 150ms, 200ms, 250ms, 300ms, 350ms, 400ms, 450ms,
+         500ms, 550ms, 600ms, 650ms, 700ms, 750ms, 800ms, 850ms, 900ms, 950ms]
+assert:
+  peak: { min: 0.5, max: 1.0 }
+  non_finite_samples: { max: 0 }

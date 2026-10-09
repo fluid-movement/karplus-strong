@@ -1,0 +1,20 @@
+[package]
+name = "karplus-ffi"
+description = "C ABI wrapper around karplus-core, for the VCV Rack shim."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+# `staticlib` is what the Rack plugin links; `rlib` keeps it testable.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+karplus-core.workspace = true
+
+[dev-dependencies]
+# Host-only, only to generate the header. The same version Fathom uses.
+cbindgen = "0.29"

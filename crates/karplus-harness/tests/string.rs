@@ -403,3 +403,30 @@ fn fathoms_dc_blocker_is_the_filter_the_tuning_assumes() {
         );
     }
 }
+
+#[test]
+fn the_sample_rate_does_not_change_the_level() {
+    // The same pluck at every rate Rack offers, averaged over a few seeds
+    // because one burst of noise is one draw. Without the noise held to a
+    // fixed rate, 96 kHz came out 3 dB down and 192 kHz 6 dB.
+    let level = |rate: f32| {
+        let mut sum = 0.0;
+        for seed in 1..=8 {
+            let p = Params {
+                pitch_volts: -0.25,
+                ..Params::default()
+            };
+            let out = render(&p, &[Pluck::trigger(0.0)], 1.0, rate, seed);
+            sum += 20.0 * rms(span(&out, rate, 0.05, 1.0)).log10();
+        }
+        sum / 8.0
+    };
+    let reference = level(48_000.0);
+    for rate in [44_100.0f32, 96_000.0, 192_000.0] {
+        let difference = level(rate) - reference;
+        assert!(
+            difference.abs() < 1.0,
+            "{rate} Hz is {difference:+.2} dB from 48 kHz"
+        );
+    }
+}

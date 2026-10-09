@@ -1,0 +1,13 @@
+name: resonator_noise
+description: >
+  No plucks: white noise at the audio input at -12 dB, the string as a
+  resonator, with its pitch swept slowly down. A tuned comb, or a bowed
+  string in wind.
+duration: 6s
+params: { decay: 0.9, brightness: 0.6 }
+plucks: []
+audio_in: { noise: 0.25 }
+automation:
+  pitch_volts: { from: 0.0, to: -1.0, over: 4s, start: 1s, shape: smooth }
+assert:
+  non_finite_samples: { max: 0 }

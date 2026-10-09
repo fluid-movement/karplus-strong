@@ -1,0 +1,17 @@
+{
+  "slug": "KarplusStrong",
+  "name": "Karplus-Strong",
+  "version": "2.0.0",
+  "license": "MIT OR Apache-2.0",
+  "brand": "Karplus-Strong",
+  "description": "A plucked string. One DSP core in Rust, built on Fathom's primitives.",
+  "sourceUrl": "https://github.com/fluid-movement/karplus-strong",
+  "modules": [
+    {
+      "slug": "KarplusStrong",
+      "name": "Karplus-Strong",
+      "description": "Polyphonic plucked string: tuned Karplus-Strong loop with pick position, drive, damping and an audio exciter input.",
+      "tags": ["Physical modeling", "Oscillator", "Polyphonic"]
+    }
+  ]
+}

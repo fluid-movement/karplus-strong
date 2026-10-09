@@ -1,0 +1,11 @@
+name: decay_long
+description: >
+  DECAY at 0.75 is 3.05 · 2 = 8.9 s. With key tracking up, an A4 must take
+  that long to fall sixty decibels — measured on the fundamental, from the
+  slope between 10 and 40 dB down.
+pitch: A4
+duration: 9s
+params: { decay: 0.75, key_track: 1.0 }
+assert:
+  t60_s: { min: 7.6, max: 10.2 }
+  pitch_error_cents: { min: -1.0, max: 1.0 }

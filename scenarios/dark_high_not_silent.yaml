@@ -1,0 +1,13 @@
+name: dark_high_not_silent
+description: >
+  BRIGHT fully down on a high note. With an absolute cutoff this was a
+  click and then nothing; with the cutoff following the note it is a short,
+  muted pluck. "No bad settings": it must still be a note.
+pitch: C6
+duration: 1s
+params: { brightness: 0.0 }
+analysis: { from: 0s, to: 150ms }
+assert:
+  peak: { min: 0.2, max: 1.0 }
+  pitch_error_cents: { min: -2.0, max: 2.0 }
+  non_finite_samples: { max: 0 }

@@ -107,6 +107,16 @@ const VELOCITY_KNOB_REACH: f32 = 0.25;
 /// One in eight.
 const DUST_THRESHOLD: u32 = u32::MAX / 8;
 
+/// The rate noise and dust are drawn at, in Hz, whatever the sample rate.
+///
+/// A burst of white noise one period long puts `σ/√P` into each harmonic,
+/// and `P` doubles with the sample rate: drawn afresh every sample, the
+/// same pluck came out 3 dB quieter at 96 kHz than at 48, and 6 dB at 192.
+/// Held to a 48 kHz grid instead, the burst has the same spectrum in the
+/// audio band at every rate; what holding adds above 24 kHz the loop filter
+/// takes off on the first pass. Below 48 kHz there is nothing to hold.
+const NOISE_REFERENCE_HZ: f32 = 48_000.0;
+
 /// Longest burst, in samples, whatever the knob and the note say.
 const MAX_BURST: f32 = 65_536.0;
 
@@ -178,6 +188,9 @@ pub struct Voice {
     sine_increment: i32,
     gate_high: bool,
     burst_left: u32,
+    noise_rate: f32,
+    noise_clock: f32,
+    noise_held: f32,
     sine_phase: Phase,
     noise: Rng,
     human: Rng,
@@ -215,6 +228,9 @@ impl Voice {
             sine_increment: 0,
             gate_high: false,
             burst_left: 0,
+            noise_rate: clamp(NOISE_REFERENCE_HZ / rate, 0.0, 1.0),
+            noise_clock: 1.0,
+            noise_held: 0.0,
             sine_phase: Phase::new(),
             noise: Rng::new(seed),
             human: Rng::new(seed),
@@ -245,6 +261,8 @@ impl Voice {
         self.sine_increment = 0;
         self.gate_high = false;
         self.burst_left = 0;
+        self.noise_clock = 1.0;
+        self.noise_held = 0.0;
         self.sine_phase = Phase::new();
         self.noise = Rng::new(self.seed);
         // A second stream, so that turning HUMANIZE up does not change the
@@ -294,7 +312,9 @@ impl Voice {
             }
 
             let burst = self.burst(p.exciter) * self.velocity;
-            let excitation = self.tone_filter.process(burst + EXTERNAL_INPUT_GAIN * finite(input));
+            let excitation = self
+                .tone_filter
+                .process(burst + EXTERNAL_INPUT_GAIN * finite(input));
             let picked = 0.5 * (excitation - self.comb.read(self.comb_delay.next()));
             self.comb.write(excitation);
 
@@ -445,6 +465,7 @@ impl Voice {
             p.length - VELOCITY_KNOB_REACH * unit(p.velocity_length) * (1.0 - self.velocity);
         let samples = clamp(burst_periods(length) * period + 0.5, 1.0, MAX_BURST);
         self.burst_left = samples as u32;
+        self.noise_clock = 1.0;
         // From the crest, so that even a one-sample burst is a strike.
         self.sine_phase = Phase::new();
         self.sine_phase.set_turns(0.25);
@@ -457,24 +478,37 @@ impl Voice {
         }
         self.burst_left -= 1;
         match kind {
-            ExciterKind::Noise => self.noise.bipolar(),
-            ExciterKind::Dust => {
-                let bits = self.noise.next_u32();
-                if bits < DUST_THRESHOLD {
-                    if bits & 1 == 0 {
-                        1.0
-                    } else {
-                        -1.0
-                    }
-                } else {
-                    0.0
+            ExciterKind::Noise | ExciterKind::Dust => {
+                self.noise_clock += self.noise_rate;
+                if self.noise_clock >= 1.0 {
+                    self.noise_clock -= 1.0;
+                    self.noise_held = self.draw(kind);
                 }
+                self.noise_held
             }
             ExciterKind::Sine => {
                 let s = sin_turns(self.sine_phase.turns());
                 self.sine_phase.advance(self.sine_increment);
                 s
             }
+        }
+    }
+
+    /// A fresh noise or dust value.
+    fn draw(&mut self, kind: ExciterKind) -> f32 {
+        if kind == ExciterKind::Dust {
+            let bits = self.noise.next_u32();
+            if bits < DUST_THRESHOLD {
+                if bits & 1 == 0 {
+                    1.0
+                } else {
+                    -1.0
+                }
+            } else {
+                0.0
+            }
+        } else {
+            self.noise.bipolar()
         }
     }
 

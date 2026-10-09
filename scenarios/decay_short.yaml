@@ -1,0 +1,8 @@
+name: decay_short
+description: DECAY at 0.25 is 0.45 s. The short end must mean what it says too.
+pitch: A4
+duration: 1s
+params: { decay: 0.25, key_track: 1.0 }
+assert:
+  t60_s: { min: 0.38, max: 0.52 }
+  peak: { min: 0.3, max: 1.0 }

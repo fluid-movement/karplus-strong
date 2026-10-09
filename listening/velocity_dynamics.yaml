@@ -1,0 +1,15 @@
+name: velocity_dynamics
+description: >
+  A crescendo through the VEL jack with every velocity amount up: soft
+  plucks are quieter, darker, shorter and have a shorter burst.
+pitch: G3
+duration: 5s
+params: { velocity_brightness: 1.0, velocity_decay: 1.0, velocity_length: 1.0, decay: 0.6 }
+plucks:
+  - { at: 0s, velocity: 1.5 }
+  - { at: 600ms, velocity: 3 }
+  - { at: 1.2s, velocity: 5 }
+  - { at: 1.8s, velocity: 7.5 }
+  - { at: 2.4s, velocity: 10 }
+assert:
+  non_finite_samples: { max: 0 }

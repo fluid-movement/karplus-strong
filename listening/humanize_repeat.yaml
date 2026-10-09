@@ -1,0 +1,11 @@
+name: humanize_repeat
+description: >
+  The same note plucked eight times, HUMANIZE fully up: tuning, brightness
+  and pick position vary on every pluck. Does it stop sounding like a
+  machine, or start sounding out of tune?
+pitch: D3
+duration: 4s
+params: { humanize: 1.0, decay: 0.55 }
+plucks: [0s, 400ms, 800ms, 1.2s, 1.6s, 2s, 2.4s, 2.8s]
+assert:
+  non_finite_samples: { max: 0 }

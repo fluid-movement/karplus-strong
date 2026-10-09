@@ -1,0 +1,14 @@
+name: pluck_low_c1
+description: >
+  The bottom of a bass. The DC blocker sits at a five-hundred-and-twelfth of
+  the note here, under a tenth of a hertz, so this is where a slow offset
+  would show if the excitation carried one.
+pitch: C1
+duration: 4s
+params: { decay: 0.8 }
+analysis: { from: 100ms, to: 3s }
+assert:
+  pitch_error_cents: { min: -1.0, max: 1.0 }
+  peak: { min: 0.12, max: 1.0 }
+  dc_offset_dbfs: { max: -50 }
+  non_finite_samples: { max: 0 }

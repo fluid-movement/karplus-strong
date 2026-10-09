@@ -1,0 +1,12 @@
+name: nylon_dark
+description: >
+  Dark and short, plucked near the middle of the string: a nylon string or
+  a muted harp. The question is whether BRIGHT this low still sounds like a
+  string or has become a thud.
+pitch: G2
+duration: 4s
+params: { brightness: 0.15, decay: 0.55, pick: 0.9 }
+plucks: [0s, 1s, 2s]
+assert:
+  non_finite_samples: { max: 0 }
+  peak: { min: 0.05, max: 1.0 }

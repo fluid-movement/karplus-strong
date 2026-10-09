@@ -1,0 +1,11 @@
+name: dust_scrape
+description: >
+  The dust exciter with a long burst: sparse impulses for four periods, a
+  scrape or a brush across the string rather than a pick.
+pitch: A2
+duration: 4s
+exciter: dust
+params: { length: 1.0, decay: 0.7 }
+plucks: [0s, 1.5s]
+assert:
+  non_finite_samples: { max: 0 }

@@ -1,0 +1,40 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/karplus-core",
+    "crates/karplus-harness",
+    "crates/karplus-ffi",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/fluid-movement/karplus-strong"
+publish = false
+
+[workspace.dependencies]
+karplus-core = { path = "crates/karplus-core" }
+# Borrowed from Fathom, pinned to one commit. This is the experiment
+# (docs/fathom-reuse.md): use Fathom's primitives as they are, change nothing
+# on that side, and write down where they fit and where they do not.
+fathom-core = { git = "https://github.com/fluid-movement/Fathom", rev = "be4d00b9fc7a777a2ba4f20b052d68915c6b43f0" }
+fathom-harness = { git = "https://github.com/fluid-movement/Fathom", rev = "be4d00b9fc7a777a2ba4f20b052d68915c6b43f0" }
+fathom-analysis = { git = "https://github.com/fluid-movement/Fathom", rev = "be4d00b9fc7a777a2ba4f20b052d68915c6b43f0" }
+
+# Tests run optimised: every one of them renders seconds of audio, and an
+# unoptimised build of the DSP is twenty times slower. Debug assertions and
+# overflow checks stay on. Both profiles, because the core under test is a
+# dependency of the harness's tests and builds with `dev`, not `test`.
+[profile.dev]
+opt-level = 2
+
+[profile.test]
+opt-level = 2
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true

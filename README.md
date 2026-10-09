@@ -1,66 +1,57 @@
-# Karplus-Strong — VST3/AU Synth Plugin
+# Karplus-Strong
 
-A polyphonic Karplus-Strong plucked-string synthesizer built with JUCE 8.
+A polyphonic plucked string for VCV Rack. A Karplus-Strong loop, tuned to
+within a cent across the keyboard, with a pick position, drive, damping, and
+an audio input that turns the string into a resonator.
+
+The sound is made by a Rust core (`crates/karplus-core`) that knows nothing
+about Rack, so the same code can run on hardware later. The Rack module is a
+thin C++ shim around it. The structure, and several of the building blocks,
+come from [Fathom](https://github.com/fluid-movement/Fathom).
+`docs/fathom-reuse.md` covers what was reused and what was not.
+
+This replaces the earlier JUCE VST3/AU plugin, which is in the git history
+up to `e08f83c`.
+
+## The panel
+
+| Control | What it does |
+| --- | --- |
+| **DECAY** | How long the string rings: 0.1 s to 40 s for an A4 to fall 60 dB |
+| **BRIGHT** | How much of the high end survives each pass. Follows the note, so it means the same timbre everywhere |
+| **PICK** | Where the string is plucked: thin and nasal at the bridge, hollow in the middle |
+| **DRIVE** | How hard the pluck hits a saturator inside the loop: louder, squarer, overtones that bloom as it dies |
+| CV + trimpot under each | ±5 V moves the knob through its whole range, scaled by the trimpot |
+| **PITCH** | ±4 octaves, added to V/OCT |
+| **TONE** | Lowpass on the pluck itself: soft fingertip to hard plectrum. Fully up is no filter |
+| **LENGTH** | Pluck burst, 1/16 to 4 periods of the note |
+| **DAMP** | Fully down, the string rings out. Turned up, it is stopped when the gate falls, 3 s down to 20 ms |
+| HUMAN | Per-pluck variation in tuning, brightness and pick position |
+| KEY | 0: low notes ring longer, as on a real string. 1: every note rings for DECAY |
+| HARM | The sine exciter's harmonic, 1–8 |
+| NOISE / DUST / SINE | The pluck: white noise, sparse impulses, or a sine on the chosen harmonic |
+| VELOCITY: BRIGHT / DECAY / LENGTH | How much a soft velocity darkens, shortens or thins the note |
+| PLUCK | Plucks every active voice by hand |
+| **V/OCT, GATE** | Polyphonic: one string per channel, up to 16. A rising gate plucks |
+| **VEL** | 0–10 V, read when the gate rises. Unpatched is full velocity |
+| **IN** | Audio added to the pluck. With no gates, the string rings with whatever comes in |
+| **OUT** | Polyphonic, ±5 V |
 
 ## Build
 
-```bash
-cmake -B build -G Xcode
-cmake --build build --config Release
-```
-
-Plugins auto-install to:
-- VST3: `~/Library/Audio/Plug-Ins/VST3/Karplus-Strong.vst3`
-- AU: `~/Library/Audio/Plug-Ins/Components/Karplus-Strong.component`
-- Standalone: `build/KarplusStrong_artefacts/Release/Standalone/Karplus-Strong.app`
-
-## Use in Ableton Live
-
-1. Build the plugin (above).
-2. In Live: Options → Preferences → File Folder → "Rescan Plug-Ins".
-3. Find "Karplus-Strong" in the Plug-Ins browser under VST or Audio Units.
-4. Drag onto a MIDI track. Play.
-
-## Parameters
-
-| Parameter | Range | Description |
-|---|---|---|
-| Decay | 0.50 – 0.999 | Feedback gain (higher = longer sustain) |
-| Brightness | 0 – 1 | Lowpass cutoff in feedback loop |
-| Excitation Type | Noise / Sine / Dust | Source of the pluck burst |
-| Excitation Length | 1 – 1000 samples | Duration of the excitation burst |
-| Pick Position | 0 – 0.5 | Fraction of delay length for pick modeling |
-| Pick Model | Off / Comb / Two-delay | Pick-position implementation |
-| Velocity→Brightness | 0 – 1 | How much velocity modulates brightness |
-| Velocity→Decay | 0 – 1 | How much velocity modulates decay time |
-| Voices | 1 – 16 | Polyphony count |
-| Output Level | 0 – 1 | Final output gain |
-
-All parameters are exposed to the host for automation.
-
-## Project structure
+You need Rust (via [rustup](https://rustup.rs)), a C++ compiler, `make`, and
+[`just`](https://github.com/casey/just). Fathom is a private repository and a
+git dependency, so the machine must be signed in to GitHub with access to it.
 
 ```
-karplus-strong/
-├── CMakeLists.txt
-├── JUCE/                      # git submodule (8.0.14)
-├── src/
-│   ├── PluginProcessor.h/cpp   # AudioProcessor + APVTS + Synthesiser
-│   ├── PluginEditor.h/cpp      # GUI (rotary sliders, combo boxes)
-│   └── dsp/
-│       ├── KarplusStrongDsp.h    # Pure KS algorithm (no JUCE, testable)
-│       └── KarplusStrongVoice.h # SynthesiserVoice wrapper
-├── tests/
-│   └── test_dsp.cpp            # Catch2 unit tests
-├── README.md
-└── AGENTS.md
+just vcv        # fetch the Rack SDK, build, install into Rack's plugin folder
+just verify     # the full check: tests, scenarios, lints, embedded build
+just render     # every scenario and listening patch as a WAV in listening/out/
 ```
 
-## Editing
+Then restart Rack and find **Karplus-Strong** in the module browser.
 
-Edit the C++ source in `src/`, then rebuild:
-```bash
-cmake --build build --config Release
-```
+## Licence
 
-No code generation step — the compiler is the source of truth.
+MIT OR Apache-2.0, at your option. With JUCE gone, the AGPL it required no
+longer applies.

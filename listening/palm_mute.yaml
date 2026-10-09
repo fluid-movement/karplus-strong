@@ -1,0 +1,14 @@
+name: palm_mute
+description: >
+  DAMP up, gates of different lengths: the string stops when the gate falls.
+  Listen for the stop: it should sound like a hand, not a VCA.
+pitch: E2
+duration: 3s
+params: { damp: 0.65, decay: 0.8 }
+plucks:
+  - { at: 0s, held: 120ms }
+  - { at: 500ms, held: 120ms }
+  - { at: 1s, held: 400ms }
+  - { at: 2s, held: 900ms }
+assert:
+  non_finite_samples: { max: 0 }

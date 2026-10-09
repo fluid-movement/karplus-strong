@@ -1,0 +1,10 @@
+name: sitar_drive
+description: >
+  Full drive and a long decay on a low note: the burst hits the loop's tanh
+  hard, and the overtones should bloom and settle as it dies away.
+pitch: D2
+duration: 8s
+params: { drive: 1.0, decay: 0.85, brightness: 0.7 }
+assert:
+  non_finite_samples: { max: 0 }
+  peak: { min: 0.2, max: 1.0 }

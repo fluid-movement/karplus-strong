@@ -1,85 +1,75 @@
 # Architecture
 
-Read when you need to understand how modules fit together or trace the
-MIDI-to-audio data flow.
+One core, thin shells, as in Fathom. The core knows nothing about Rack,
+hardware, files or the screen. A shell reads its controls, fills `Params`,
+calls `Voice::process`, and writes the output.
 
-## Layer graph
+## Workspace
 
 ```
-MIDI in
-  │
-  ▼
-PluginProcessor (src/PluginProcessor.h:7)
-  ├── apvts (AudioProcessorValueTreeState)  src/PluginProcessor.h:42
-  ├── cached param atomics                  src/PluginProcessor.h:48-58
-  ├── synth (juce::Synthesiser)             src/PluginProcessor.h:45
-  │     ├── KarplusStrongSound              src/dsp/KarplusStrongVoice.h:7
-  │     └── KarplusStrongVoice[16]          src/dsp/KarplusStrongVoice.h:14
-  │           └── dsp (KarplusStrongDsp)    src/dsp/KarplusStrongVoice.h:68
-  │                 ├── exciter  (Exciter)      3× CircularBuffer
-  │                 └── delayLine (KsDelayLine) CircularBuffer + OnePoleLowpass
-  │                                             + DcBlocker + SilenceDetector
-  └── PluginEditor (src/PluginEditor.h)  — owns controls + attachments, not DSP
+crates/karplus-core/     no_std, no allocator, forbid(unsafe). One dependency: fathom-core.
+crates/karplus-ffi/      staticlib. C ABI for the shim; committed cbindgen header.
+crates/karplus-harness/  std. Rendering, scenario runner, property tests.
+targets/vcv/             The only C++. Rack module shim, panel generator.
+scenarios/               YAML requirements. The spec.
+listening/               Patches for listening, same format.
 ```
 
-Shared plumbing: `KsParams` (one struct carried through the whole parameter
-chain) and `KsCalibration.h` (constants + pure tuning functions). See
-`dsp.md` for the DSP file map.
+Fathom crates come in as git dependencies pinned to one commit
+(`Cargo.toml`). `docs/fathom-reuse.md` lists what is used and what is not.
 
-## Ownership rules
+## Core API
 
-| Owner | Owns | Notes |
-|---|---|---|
-| `PluginProcessor` | `synth`, `apvts`, cached param pointers, `currentNumVoices` | `synth` is private; `apvts` is public so the editor can attach |
-| `juce::Synthesiser` | voices (OwnedArray), sounds (ReferenceCountedArray) | All 16 voices are preallocated in the constructor; the `voices` param only toggles each voice's `enabled` flag |
-| `KarplusStrongVoice` | `dsp` (by value) | One DSP instance per voice — no shared DSP state |
-| `KarplusStrongDsp` | `exciter`, `delayLine` (by value) | Thin facade; no JUCE dependency |
-| `Exciter` / `KsDelayLine` | `CircularBuffer`s (by value) | Buffers sized `sampleRate * ks::maxDelaySeconds` (0.25 s) in `prepare` |
+```rust
+Voice::new(sample_rate: f32, seed: u32) -> Self
+Voice::reset(&mut self)                     // silent, as new; audio-thread safe
+Voice::process(&mut self, p: &Params, gate: &[f32], audio_in: &[f32], out: &mut [f32])
+```
 
-## MIDI → audio path (one block)
+`gate` is in volts, `audio_in` at ±1 full scale. Either can be shorter than
+`out`, or empty: missing samples count as zero. A `Voice` holds its delay
+lines inline (about 48 KB), so a polyphonic shell keeps one per channel,
+allocated once.
 
-1. Host calls `processBlock(buffer, midi)` — `src/PluginProcessor.cpp:75`
-2. `buffer.clear()`, then `updateNumVoices` (enabled-flag toggle only, no
-   allocation)
-3. `updateVoiceParameters()` builds one `KsParams` from the cached atomics and
-   pushes it to every voice; `updateVoicePans()` computes each voice's
-   `stereo_spread`-derived pan the same way
-4. `synth.renderNextBlock(buffer, midi, 0, N)`
-5. Synthesiser splits block at MIDI event positions, calls `noteOn`/`noteOff`
-   (JUCE internals — see `voice-and-synth.md` for our hooks)
-6. For each sub-block, `renderVoices()` calls each voice's `renderNextBlock`
-7. Each `KarplusStrongVoice::renderNextBlock` pulls `dsp.processSample()` per
-   sample and adds it to both channels scaled by that voice's pan gains
-   (`src/dsp/KarplusStrongVoice.h`) — at the default `stereo_spread == 0` both
-   gains are `1.0`, identical to the original mono-copy behavior
-8. Voice calls `clearCurrentNote()` + breaks when `dsp.isSilent()`
+There is no `configure()`/`Config` (decision K5).
 
-## Parameter → DSP binding
+## The VCV shim
 
-`PluginProcessor` reads the cached APVTS atomics each block, fills a
-`KsParams`, and calls `voice->setParameters(params)` —
-`src/PluginProcessor.cpp:84-101`. The struct is forwarded by const ref:
-Voice → `KarplusStrongDsp` → `Exciter` + `KsDelayLine`. Each consumer reads
-only the fields it owns. See `parameters.md` for the per-param mapping.
+`targets/vcv/src/KarplusStrong.cpp` collects 16 samples of gate and audio per
+channel, renders them through `karplus_voice_process`, and plays them out
+while collecting the next 16 (K17). The channel count is the wider of V/OCT
+and GATE (K3). A voice that comes back into use is reset first, so it
+doesn't resume an old note.
 
-## Real-time-safety rules
+The only arithmetic in the shim is in `controls.hpp` (knob plus attenuated
+CV, volts in and out, switch positions, channel count). It has no Rack
+dependency and is tested by `just shim`. Panel coordinates come from
+`res/panel.py`, which generates `res/KarplusStrong.svg`.
 
-- No allocation, locks, or buffer resizing in `processBlock` or anything it
-  calls. Voices are preallocated (`maxVoices = 16`,
-  `src/PluginProcessor.h:10`); buffers are sized once in `prepare`.
-- Parameter access is via cached `std::atomic<float>*` — no per-block string
-  lookups.
+## Rules for the core
 
-## Module summaries
+Fathom's, unchanged: `no_std`, no allocator, `#![forbid(unsafe_code)]`, `f32`
+only, no panics in the audio path (clippy denies indexing, `unwrap` and
+friends outside tests), its own maths (no `libm`), deterministic (seeded
+noise only), denormals flushed in every filter state. `just rules` checks the
+mechanical ones.
 
-| Module | File | One-line responsibility |
-|---|---|---|
-| PluginProcessor | `src/PluginProcessor.h:7` | AudioProcessor, APVTS, Synthesiser owner, per-block param push |
-| PluginEditor | `src/PluginEditor.h` | GUI: data-driven controls in two GroupComponent panels (see `ui.md`) |
-| KarplusStrongVoice | `src/dsp/KarplusStrongVoice.h:14` | SynthesiserVoice wrapper: startNote/stopNote/renderNextBlock + enabled flag |
-| KarplusStrongDsp | `src/dsp/KarplusStrongDsp.h` | Thin composition of Exciter + KsDelayLine (no JUCE dep) |
-| Exciter | `src/dsp/Exciter.h` | Excitation generation (noise/sine/dust) + pick model routing |
-| KsDelayLine | `src/dsp/KsDelayLine.h` | KS feedback loop topology |
-| KsParams | `src/dsp/KsParams.h` | plain param struct passed through the chain |
-| KsCalibration | `src/dsp/KsCalibration.h` | named constants + pure tuning functions |
-| CircularBuffer / OnePoleLowpass / DcBlocker / SilenceDetector | `src/dsp/*.h` | single-purpose primitives, individually unit-tested |
+## Verification
+
+`just verify` is the gate, about 30 s warm:
+
+| Step | What |
+| --- | --- |
+| `fmt`, `lint` | rustfmt, clippy with warnings as errors |
+| `test` | unit tests in each crate; property tests in `karplus-harness/tests` |
+| `nostd` | the core builds for `thumbv7em-none-eabihf` |
+| `rules` | no `f64`, `no_std`, `forbid(unsafe_code)`, no dependency but `fathom-core` |
+| `shim` | builds the staticlib, compiles and runs `controls_test.cpp` |
+| `scenarios` | renders and checks every file in `scenarios/` |
+| `listening-check` | parses every file in `listening/` |
+
+The header drift test (`karplus-ffi/tests/header.rs`) runs under `test`. It
+also compiles the header as C and as C++.
+
+Not in the gate: building against the real Rack SDK (`just vcv`, which needs
+the SDK and installs into Rack).

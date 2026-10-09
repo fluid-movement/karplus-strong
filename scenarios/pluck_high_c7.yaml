@@ -1,0 +1,13 @@
+name: pluck_high_c7
+description: >
+  Near the top: a period of twenty-three samples, where linear
+  interpolation and an uncompensated filter delay put the JUCE version
+  tens of cents flat.
+pitch: C7
+duration: 2s
+params: { decay: 0.8, key_track: 1.0 }
+analysis: { from: 20ms, to: 1s }
+assert:
+  pitch_error_cents: { min: -1.0, max: 1.0 }
+  peak: { min: 0.2, max: 1.0 }
+  non_finite_samples: { max: 0 }

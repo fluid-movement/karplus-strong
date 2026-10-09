@@ -1,0 +1,14 @@
+name: glide
+description: >
+  An octave up in fifty milliseconds while the string rings, at the
+  hardware's block size of 64. The delay length ramps across each block;
+  stepped once per block, every step is a click.
+duration: 1s
+block_size: 64
+params: { brightness: 0.3, decay: 1.0, key_track: 1.0 }
+automation:
+  pitch_volts: { from: 0.0, to: 1.0, over: 50ms, start: 500ms }
+analysis: { from: 400ms, to: 650ms }
+assert:
+  discontinuity: { max: 0.5 }
+  non_finite_samples: { max: 0 }

@@ -1,204 +1,78 @@
 # DSP
 
-Read when editing the DSP, adding an exciter, or changing the KS algorithm.
+One voice is one string: `karplus_core::Voice`. Everything is in
+`crates/karplus-core/src`, and the reason behind each choice is in
+`docs/decisions.md`.
 
-All classes are header-only in `src/dsp/`, pure C++, and unit-tested without
-JUCE (see `tests/test_dsp.cpp`). The composition root is `KarplusStrongDsp`
-(`src/dsp/KarplusStrongDsp.h`). Small single-purpose primitives are composed
-into the two processing classes.
-
-## File map
-
-| File | Responsibility |
-|---|---|
-| `KsParams.h` | plain struct of all voice parameters; passed by const ref through the whole chain |
-| `KsCalibration.h` | namespace `ks`: named constants + pure functions `computeCutoffHz` / `computeFeedbackGain` |
-| `CircularBuffer.h` | delay buffer: `prepare(size)`, `clear()`, `write(x)`, `readDelayed(d)` (linearly-interpolated fractional read, clamped `[1, size-1]`) |
-| `OnePoleLowpass.h` | RC lowpass; `setCutoff` computes alpha once (not per sample) |
-| `DcBlocker.h` | one-pole DC blocker (~`ks::dcBlockerHz` = 5 Hz) |
-| `SilenceDetector.h` | peak tracker with halving window + min-samples guard |
-| `Exciter.h` | burst generation (noise/sine/dust) + pick-model routing |
-| `KsDelayLine.h` | the KS feedback loop topology |
-| `KarplusStrongDsp.h` | facade: one Exciter + one KsDelayLine |
-
-## Signal flow per sample
+## Signal flow
 
 ```
-KarplusStrongDsp::processSample()           src/dsp/KarplusStrongDsp.h:45
-  │
-  ├── exciter.isActive()? ──► exciter.processSample()  (nonzero during burst)
-  │                            else 0.0f
-  │
-  ▼
-delayLine.processSample(excitation)         src/dsp/KsDelayLine.h:60
-  │
-  ├── delayed = buffer.readDelayed(delaySamples)          (linear-interpolated)
-  ├── if excitation != 0:  input = excitation                                (burst phase)
-  │   else:                input = saturate(dcBlocker(lowpass(delayed)), drive) * feedbackGain  (ring phase)
-  ├── if damping (Damp mode, after noteOff): input *= releaseGain; releaseGain *= releaseCoeff
-  ├── buffer.write(input)
-  ├── output = delayed * velocity * params.outputLevel * (releaseGain if damping)
-  ├── silence.track(output)
-  └── return output
+gate ─► pluck ─► burst × velocity ─┐
+                                  (+)─► tone lowpass ─► pick comb ─► × drive gain ─┐
+audio in × 0.1 ───────────────────┘                                                │
+                                                                                   ▼
+       ┌──── delay line ──► loop lowpass ──► DC blocker ──► × loop gain ──────► (+) ─► shape ─┬─► out
+       │                                                                                      │
+       └──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-`KarplusStrongDsp::noteOn` applies the `humanize` detune (see below) to `frequency`
-before deriving `delaySamp` and calling into `exciter`/`delayLine`, so the
-exciter's pitch tracking and the string's tuning always agree.
+Per sample (`Voice::process`):
 
-## Calibration — `src/dsp/KsCalibration.h`
+1. A rising gate (through 1 V) **plucks**: velocity is sampled, humanize
+   offsets are drawn, and a burst of `LENGTH` periods starts.
+2. The burst (noise, dust or sine) is scaled by velocity, summed with the
+   audio input, lowpassed by TONE, and combed by PICK.
+3. The string's previous output is read from the delay line with a Lagrange
+   fractional read, lowpassed (BRIGHT), DC-blocked, and scaled by the loop
+   gain.
+4. The two are summed and **shaped**: the safety knee at no drive, `tanh` at
+   full drive, crossfaded. Both have a slope of one at zero and never exceed
+   one.
+5. That sample is written to the delay line and is the output.
 
-All magic numbers live here as named constants (`ks::maxFeedbackGain`,
-`ks::silenceThreshold`, `ks::minCutoffHz`, `ks::maxDelaySeconds`, …).
-The two pure functions are directly unit-tested (`tests/test_dsp.cpp`,
-`[calibration]` tag):
+Per block (`Voice::targets`), from the knobs and the note:
 
-| Function | Formula |
-|---|---|
-| `computeCutoffHz(brightness)` | `200 + clamp(brightness, 0, 1) * 11800` |
-| `computeFeedbackGain(decayTime, freq, delaySamples, keyTrack, cutoffHz, sr)` | `clamp(exp(-ln1000·effDelay/(decayTime·sr)) · sqrt(1+(freq/cutoffHz)²), 0, 0.99999)` where `effDelay = refDelay + keyTrack·(delaySamples − refDelay)`, `refDelay = sr/440` |
+| Derived | How |
+| --- | --- |
+| frequency | `ZERO_VOLT_HZ · 2^(pitch + humanize detune)`, clamped so the period fits the delay line (5.9 Hz to a quarter of the sample rate at 48 kHz) |
+| loop lowpass | cutoff `f · brightness_ratio(BRIGHT)`, capped at 0.45·fs; coefficient `1 − e^(−2π·fc/fs)` |
+| delay length | `period − (lowpass delay + DC blocker delay at f)`: so the whole loop is exactly one period |
+| loop gain | `wanted / (lowpass gain · blocker gain at f)`, capped by `SUB_MODE_GAIN` and `MAX_LOOP_GAIN` |
+| wanted | `1000^(−passes / (T·fs))`: 60 dB in `T` seconds, where `passes` is the A4 period, or this note's with KEY up |
+| damping | when the gate is low and DAMP > 0, `wanted` is lowered to reach 60 dB in the damping time at this note |
+| comb delay | `β · period`, β = `PICK / 2` + humanize |
 
-The `sqrt(1+(f/fc)²)` factor cancels the lowpass's loss at the fundamental so
-dialed decay seconds match perceived decay (see `gotchas.md` trap #6). The DC
-blocker in the ring phase prevents the loop holding DC forever when
-`feedbackGain` approaches 1.
+The delay length, loop gain and comb delay glide linearly to their new values
+over each block, so nothing steps. A gate edge mid-block recomputes them for
+the rest of the block.
 
-Velocity modulation happens in `KsDelayLine::noteOn` (`src/dsp/KsDelayLine.h:37`)
-before calling these: `modBright = brightness + velBrightness·(vel−0.5)`,
-`modT = decayTime · (1 + velDecay·(vel−0.5))`. `Exciter::noteOn` applies the
-analogous `modLength = excitationLength · (1 + velExcitationLength·(vel−0.5))`.
+## Knob laws
 
-Two more pure helpers support the drive/damp features, both `[calibration]`-tagged:
+All in `crates/karplus-core/src/params.rs`. A knob is `0..1`.
 
-| Function | Formula |
-|---|---|
-| `applySaturation(x, amount)` | bypass at `amount<=0`; else `tanh(x·k)/tanh(k)` where `k = 1 + amount·driveMaxK` — unity-gain at `x=1`, boosts small signals (added harmonics) |
-| `computeReleaseCoeff(releaseTime, sampleRate)` | `silenceEnvelope^(1/(releaseTime·sampleRate))` — the per-sample multiplier that decays a `1.0` envelope to `ks::silenceEnvelope` (1e-3) over `releaseTime` seconds |
+| Control | Law | Default |
+| --- | --- | --- |
+| DECAY | `0.1 s · 400^k`: 0.1 – 40 s, 2 s at the centre (time for an A4 to fall 60 dB) | 0.616 (4 s) |
+| BRIGHT | cutoff = note × `2^(2 + 6k)`: 4× – 256× | 0.45 (26×) |
+| PICK | β = k / 2: bridge to middle of the string | 0.4 (β = 0.2) |
+| TONE | cutoff = note × `2^(8k)`: 1× – 256×; the last thousandth of travel is no filter | 1.0 (off) |
+| LENGTH | `2^(−4 + 6k)` periods: 1/16 – 4 | 0.667 (1 period) |
+| DRIVE | gain into the loop `1 + 7k`; shaper crossfade `k` | 0 |
+| DAMP | 0 = rings; else `3 s · (0.02/3)^k`: 3 s – 20 ms | 0 |
+| HUMAN | per pluck, up to ±2% pitch, ±0.1 BRIGHT, ±0.1 PICK | 0 |
+| KEY | 0: DECAY is the A4's time, low notes ring longer; 1: every note rings DECAY | 0 |
+| VEL → BRIGHT / DECAY / LENGTH | how far velocity below full pulls each down: BRIGHT by up to 1, DECAY and LENGTH by up to 0.25 of travel | 0 |
+| HARM | sine exciter harmonic, 1 – 8, lowered automatically to stay below Nyquist | 1 |
 
-Humanize jitter constants: `humanizeMaxDetune` (±2% frequency), `humanizeMaxBrightness` (±0.1 on the 0–1 brightness scale), `humanizeMaxPickJitter` (±0.05 on pick position). All are `humanize` (0–1) scaled and applied via a per-class xorshift RNG seeded once at construction (not reseeded per note) — each `noteOn` draws fresh jitter without needing new state.
+## Invariants the tests hold
 
-## KarplusStrongDsp — `src/dsp/KarplusStrongDsp.h`
-
-Facade composing `Exciter` + `KsDelayLine`. No JUCE dependency.
-
-| Method | Line | Purpose |
-|---|---|---|
-| `prepare(sampleRate)` | `:10` | forwards to both children |
-| `reset()` | `:16` | forwards to both children |
-| `setParameters(const KsParams&)` | `:22` | forwards the struct to both children |
-| `noteOn(freq, velocity)` | `:28` | applies `humanize` detune to `freq`; `delaySamp = delayLine.getSampleRate() / freq`; seed exciter, init delay line |
-| `noteOff(allowTailOff)` | `:35` | forwards to `delayLine.noteOff` — no-op unless Damp mode (see below and gotchas) |
-| `isSilent()` | `:40` | returns `delayLine.isSilent()` |
-| `processSample()` | `:45` | pull excitation (0 after burst), feed to delay line, return output |
-
-Key: `noteOn` computes delay length from the **delay line's** sample rate
-(not a hardcoded constant). Don't reintroduce `44100.0`.
-
-## Exciter — `src/dsp/Exciter.h`
-
-Generates the excitation burst and routes it through a pick model. Owns three
-`CircularBuffer`s used only by pick models 1 and 2, each sized
-`sampleRate * ks::maxDelaySeconds` in `prepare` (`:13`), plus a `OnePoleLowpass`
-tone filter.
-
-### Excitation types (`excitationType` int)
-
-| Value | Name | Generator |
-|---|---|---|
-| 0 | Noise | xorshift32 RNG → `[-1, 1]` |
-| 1 | Sine | `sin(phase)`, phase increments by `2π · frequency · sineHarmonic / sampleRate` — tracks the played note, `sineHarmonic` (1–8) selects which harmonic |
-| 2 | Dust | xorshift32 → `±1` impulse |
-
-The generated sample is then passed through the tone filter (see below) before
-pick-model routing.
-
-### Exciter tone filter
-
-`exciterTone` (0–1, default 1 = bypass) shapes the burst's brightness before
-the pick model, independent of the string's `brightness` control — soft
-fingertip (low tone) vs. hard plectrum (high tone). At `exciterTone >= 0.999`
-the filter is skipped entirely (`toneFilterActive = false`) so the default
-sound is bit-identical to no filter. Below that, `noteOn` sets the filter's
-cutoff to `ks::computeCutoffHz(exciterTone)` (same mapping as `brightness`)
-and resets it, so it starts clean each note.
-
-### Velocity → excitation length
-
-`noteOn(delaySamples, frequency, velocity)` computes
-`modLength = excitationLength · (1 + velExcitationLength·(vel−0.5))`, clamps
-to `[1, 1000]`, and uses that as the note's actual burst length
-(`getExcitationLength()` returns this per-note value, not the raw param —
-call `noteOn` before reading it).
-
-### Per-note humanization (pick position)
-
-If `humanize > 0`, `noteOn` jitters the pick position used for that note by
-up to `± humanize · ks::humanizeMaxPickJitter`, clamped to `[0, 0.5]`. The raw
-`pickPosition` param is untouched; only the note's effective position moves.
-
-### Pick models (`pickModel` int) — in `processSample()` (`:50`)
-
-| Value | Name | Behavior |
-|---|---|---|
-| 0 | Off | returns raw excitation |
-| 1 | Comb | pre-delay by `pickPositionForNote * delaySamples` samples |
-| 2 | Two-delay | avg of two paths: `delaySamples+pos2` and `max(1, delaySamples-pos2)` |
-
-`setParameters(const KsParams&)` reads the exciter-side fields and clamps
-`excitationLength` to `[1, 1000]`. `delaySamples` is the **string period in
-samples**, passed in via `noteOn(delaySamples, frequency, velocity)` from
-`KarplusStrongDsp::noteOn`.
-
-## KsDelayLine — `src/dsp/KsDelayLine.h`
-
-The KS feedback loop: `CircularBuffer` → `OnePoleLowpass` → `DcBlocker` →
-saturation → feedback gain. Holds a `KsParams` copy, a `SilenceDetector`, and
-the per-note state (`velocity`, `delaySamples`, `feedbackGain`, `cutoffHz`,
-damping envelope).
-
-| Method | Line | Notes |
-|---|---|---|
-| `prepare(sampleRate)` | `:15` | sizes buffer to `sampleRate * ks::maxDelaySeconds`; prepares DC blocker |
-| `getSampleRate()` | `:22` | used by `KarplusStrongDsp::noteOn` |
-| `reset()` | `:24` | clears buffer, filter states, silence detector, damping envelope |
-| `setParameters(const KsParams&)` | `:32` | stores the struct |
-| `noteOn(freq, velocity, excLen)` | `:37` | velocity mod → `ks::computeCutoffHz`/`ks::computeFeedbackGain`; jitters brightness by `humanize` first; arms the silence detector with `delaySamples + excLen + ks::silenceGuardSamples` |
-| `noteOff(allowTailOff)` | `:56` | no-op in Ring mode (`dampMode == 0`, default — unchanged behavior). In Damp mode (`dampMode == 1`) with `allowTailOff`, arms a release envelope: `releaseGain = 1`, `releaseCoeff = ks::computeReleaseCoeff(releaseTime, sampleRate)` |
-| `isSilent()` | `:58` | delegates to `SilenceDetector` |
-| `processSample(excitation)` | `:60` | the core loop (see signal flow above); ring-phase input passes through `ks::applySaturation(·, drive)`; while damping, both the feedback input and the output are multiplied by the decaying `releaseGain` |
-
-### Ring vs. Damp mode
-
-`dampMode` (0 = Ring, 1 = Damp) and `releaseTime` (seconds, only meaningful in
-Damp mode) are new `KsParams` fields. Ring mode preserves the original
-"noteOff is a no-op, string rings out per `decay`" design exactly (see
-gotchas.md). Damp mode is additive: it layers a release envelope on top of
-the normal feedback loop rather than replacing any existing decay logic, and
-only engages on a soft release (`allowTailOff == true`); a hard stop (voice
-steal / all-notes-off) still goes through `KarplusStrongVoice`'s existing
-`dsp.reset()` path.
-
-### Silence semantics — `src/dsp/SilenceDetector.h`
-
-```
-isSilent() = (samplesTracked >= minSamples) AND (peakAmplitude < ks::silenceThreshold)
-```
-
-- `minSamples` (set per note) prevents silence-reporting before the first
-  output even appears (string period + burst length + guard).
-- `peakAmplitude` decays by half every `ks::peakDecayWindow` (256) samples,
-  so once the feedback loop has quieted the signal, the voice ends.
-
-## Adding a new excitation type
-
-1. Add to the `excitation` choice param in `PluginProcessor.cpp:9` — the
-   editor combo picks up the new choice automatically.
-2. Add a `case` in `Exciter::generateExcitation()` — `src/dsp/Exciter.h:89`.
-3. Add a unit test in `tests/test_dsp.cpp`.
-
-## Adding a new pick model
-
-1. Add to the `pick_model` choice param (`PluginProcessor.cpp:18`) — combo
-   updates automatically.
-2. Add a `case` in `Exciter::processSample()` — `src/dsp/Exciter.h:50`.
-3. Pick models read `pickPosition * delaySamples` for comb spacing.
+- In tune within a cent, C1 – C7, at 44.1/48/96 kHz, BRIGHT 0.2 – 1.
+- DECAY within 15% of the measured fundamental's T60, with KEY up.
+- Never above full scale, never NaN, infinite or subnormal, never silent
+  after a pluck, at every corner of the parameter space and 200 random
+  points.
+- No steps in a fast glide at 64-sample blocks. Check this by making the delay
+  jump once per block: the test fails.
+- The same seed gives the same output, bit for bit.
+- Level within a decibel at 44.1, 96 and 192 kHz against 48.
+- Fathom's DC blocker behaves as the tuning maths predicts.

@@ -1,0 +1,11 @@
+name: dust_exciter
+description: The dust exciter. Sparse impulses still make a string at its pitch.
+pitch: D3
+duration: 2s
+exciter: dust
+params: { length: 0.8 }
+analysis: { from: 50ms, to: 1.5s }
+assert:
+  pitch_error_cents: { min: -1.0, max: 1.0 }
+  peak: { min: 0.05, max: 1.0 }
+  non_finite_samples: { max: 0 }

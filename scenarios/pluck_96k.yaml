@@ -1,0 +1,10 @@
+name: pluck_96k
+description: The default pluck at 96 kHz, where every period is twice as many samples.
+pitch: A3
+duration: 2s
+sample_rate: 96000
+analysis: { from: 50ms, to: 1.5s }
+assert:
+  pitch_error_cents: { min: -1.0, max: 1.0 }
+  peak: { min: 0.15, max: 1.0 }
+  non_finite_samples: { max: 0 }

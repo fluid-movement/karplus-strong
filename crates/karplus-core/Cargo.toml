@@ -1,0 +1,14 @@
+[package]
+name = "karplus-core"
+description = "Karplus-Strong string voice. no_std, no allocator."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# One dependency, and it is the point of the exercise: fathom-core, itself
+# no_std with zero dependencies. Nothing else may appear here without asking.
+[dependencies]
+fathom-core.workspace = true

@@ -1,0 +1,12 @@
+name: damp_mute
+description: >
+  DAMP at 0.7 is 90 ms. The gate is held for 300 ms and released; by
+  400 ms the string has been stopped, as a palm mute would stop it.
+pitch: C3
+duration: 1s
+params: { decay: 0.9, damp: 0.7 }
+plucks: [{ at: 0s, held: 300ms }]
+analysis: { from: 450ms, to: 1s }
+assert:
+  rms_dbfs: { max: -60 }
+  non_finite_samples: { max: 0 }

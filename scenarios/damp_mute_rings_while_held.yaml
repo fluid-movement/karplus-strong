@@ -1,0 +1,9 @@
+name: damp_mute_rings_while_held
+description: The opposing half of damp_mute. Until the gate falls, nothing is damped.
+pitch: C3
+duration: 1s
+params: { decay: 0.9, damp: 0.7 }
+plucks: [{ at: 0s, held: 300ms }]
+analysis: { from: 200ms, to: 290ms }
+assert:
+  rms_dbfs: { min: -25 }

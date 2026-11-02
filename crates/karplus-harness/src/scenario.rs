@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use fathom_harness::pitch::Pitch;
 use fathom_harness::scenario::{Automation, Bound, Seconds};
 use fathom_harness::{Error, Result};
-use karplus_core::{ExciterKind, Params};
+use karplus_core::{BridgeParams, ExciterKind, Params};
 use serde::Deserialize;
 
 use crate::metrics::KNOWN_METRICS;
@@ -36,6 +36,20 @@ pub const KNOWN_PARAMETERS: &[&str] = &[
     "velocity_brightness",
     "velocity_decay",
     "velocity_length",
+    "stiffness",
+    "tension",
+    "buzz",
+    "loop_trim",
+    "body_shape",
+    "body_size",
+    "body_material",
+    "body_mix",
+    "body_track",
+    "sym_scene",
+    "sym_root",
+    "sym_level",
+    "sym_decay",
+    "sym_follow",
 ];
 
 /// The burst, as written.
@@ -126,6 +140,16 @@ pub struct Analysis {
     pub to: Option<Seconds>,
 }
 
+/// An outboard filter in the loop, simulated: the string's SEND goes out
+/// through a one-pole lowpass and comes back as RETURN, with the delay the
+/// shim's blocks and Rack's cables add (K22).
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Outboard {
+    /// Cutoff of the simulated filter, Hz.
+    pub lowpass_hz: f64,
+}
+
 fn default_sample_rate() -> f64 {
     48_000.0
 }
@@ -179,6 +203,9 @@ pub struct Scenario {
     /// The audio input.
     #[serde(default)]
     pub audio_in: Option<AudioIn>,
+    /// An outboard filter patched into the loop.
+    #[serde(default)]
+    pub outboard: Option<Outboard>,
     /// Which part is measured.
     #[serde(default)]
     pub analysis: Analysis,
@@ -291,6 +318,41 @@ impl Scenario {
         self.pitch.unwrap_or(Pitch::C4).volts(440.0)
     }
 
+    /// Whether anything in the scenario involves the shared bridge.
+    pub fn uses_bridge(&self) -> bool {
+        self.params
+            .keys()
+            .chain(self.automation.keys())
+            .any(|k| k.starts_with("body_") || k.starts_with("sym_"))
+    }
+
+    /// The bridge's parameters at a time.
+    pub fn bridge_params_at(&self, t: f64) -> BridgeParams {
+        let d = BridgeParams::default();
+        let value = |name: &str, fallback: f32| -> f32 {
+            if let Some(a) = self.automation.get(name) {
+                a.value_at(t, self.duration.0) as f32
+            } else if let Some(v) = self.params.get(name) {
+                *v as f32
+            } else {
+                fallback
+            }
+        };
+        BridgeParams {
+            root_volts: self.pitch_volts_at(t) as f32,
+            body_shape: value("body_shape", d.body_shape),
+            body_size: value("body_size", d.body_size),
+            body_material: value("body_material", d.body_material),
+            body_mix: value("body_mix", d.body_mix),
+            body_track: value("body_track", 0.0) >= 0.5,
+            scene: value("sym_scene", d.scene),
+            root: value("sym_root", d.root),
+            level: value("sym_level", d.level),
+            decay: value("sym_decay", d.decay),
+            follow: value("sym_follow", 1.0) >= 0.5,
+        }
+    }
+
     /// The parameters at a time.
     pub fn params_at(&self, t: f64) -> Params {
         let mut p = Params {
@@ -320,6 +382,13 @@ impl Scenario {
         p.velocity_brightness = value("velocity_brightness", p.velocity_brightness);
         p.velocity_decay = value("velocity_decay", p.velocity_decay);
         p.velocity_length = value("velocity_length", p.velocity_length);
+        p.stiffness = value("stiffness", p.stiffness);
+        p.tension = value("tension", p.tension);
+        p.buzz = value("buzz", p.buzz);
+        // The knob is a bipolar trim: 0.5 is centre, the ends are half a
+        // semitone either side.
+        p.loop_trim_volts = (value("loop_trim", 0.5) - 0.5) / 12.0;
+        p.loop_return = self.outboard.is_some();
 
         // Velocity is a voltage that each pluck may set, and holds until the
         // next one changes it.

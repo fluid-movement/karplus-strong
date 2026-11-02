@@ -1,0 +1,13 @@
+name: tanpura_drone
+description: >
+  The tanpura tuning (scene 5 of 6, knob 0.8) with the root fixed, as a
+  tanpura is: pluck a few times at a low pitch and listen for the cloud of
+  upper partials that builds. With FOLLOW off the cloud stays at its own
+  pitch whatever is played (here a fixed C3).
+pitch: G2
+duration: 14s
+params: { decay: 0.7, brightness: 0.55, sym_level: 1.0, sym_scene: 0.8, sym_decay: 1.0, sym_follow: 0, sym_root: 0.5 }
+plucks: [0s, 2s, 4s, 6s, 8s]
+assert:
+  non_finite_samples: { max: 0 }
+  peak: { min: 0.05, max: 1.0 }

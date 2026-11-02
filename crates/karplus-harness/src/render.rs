@@ -1,6 +1,6 @@
 //! Turning parameters and gate events into samples.
 
-use karplus_core::{Params, Voice};
+use karplus_core::{Bridge, BridgeParams, Params, Voice, LOOP_LATENCY};
 
 /// Block size every render uses. Matches the VCV shim's.
 pub const BLOCK: usize = 16;
@@ -197,4 +197,99 @@ pub fn fundamental_t60(signal: &[f32], sample_rate: f32, hz: f64) -> Option<f64>
     } else {
         None
     }
+}
+
+/// Render one voice through the bridge, and optionally through a simulated
+/// outboard lowpass patched into its loop.
+///
+/// The outboard filter is a one-pole at `outboard_hz`; its answer reaches the
+/// voice [`LOOP_LATENCY`] samples after the voice sent it, the delay the
+/// shim's blocks and Rack's cables add. With a block of 16 that needs only
+/// samples from earlier blocks.
+#[allow(clippy::too_many_arguments)]
+pub fn render_chain(
+    block_size: usize,
+    plucks: &[Pluck],
+    seconds: f64,
+    sample_rate: f32,
+    seed: u32,
+    mut params_at: impl FnMut(f64) -> Params,
+    bridge_at: Option<&mut dyn FnMut(f64) -> BridgeParams>,
+    outboard_hz: Option<f64>,
+    audio_in: Option<&[f32]>,
+) -> Vec<f32> {
+    let block_size = block_size.max(1);
+    let len = (seconds * f64::from(sample_rate)).round().max(0.0) as usize;
+    let mut voice = Voice::new(sample_rate, seed);
+    let mut bridge = Bridge::new(sample_rate);
+    let mut out = vec![0.0f32; len];
+    let mut send = vec![0.0f32; len];
+    let mut returned = vec![0.0f32; len];
+    let latency = LOOP_LATENCY as usize;
+    let coefficient = outboard_hz.map_or(1.0, |hz| {
+        1.0 - (-std::f64::consts::TAU * hz / f64::from(sample_rate)).exp()
+    });
+    let mut lowpass = 0.0f64;
+    let gate: Vec<f32> = (0..len)
+        .map(|i| {
+            let t = i as f64 / f64::from(sample_rate);
+            let high = plucks.iter().any(|p| t >= p.at_s && t < p.at_s + p.held_s);
+            if high {
+                10.0
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    let mut start = 0;
+    while start < len {
+        let end = (start + block_size).min(len);
+        let t = start as f64 / f64::from(sample_rate);
+        let input = audio_in
+            .and_then(|a| a.get(start..end.min(a.len())))
+            .unwrap_or(&[]);
+        // What the outboard chain returns for this block depends on what the
+        // voice sent at least `latency` samples ago.
+        if outboard_hz.is_some() {
+            assert!(
+                block_size <= latency,
+                "the outboard loop needs a block no longer than its latency"
+            );
+            for n in start..end {
+                let sent = n
+                    .checked_sub(latency)
+                    .and_then(|m| send.get(m))
+                    .copied()
+                    .unwrap_or(0.0);
+                lowpass += coefficient * (f64::from(sent) - lowpass);
+                if let Some(slot) = returned.get_mut(n) {
+                    *slot = lowpass as f32;
+                }
+            }
+        }
+        let mut p = params_at(t);
+        p.loop_return = outboard_hz.is_some();
+        let (before, after) = (&mut send[start..end], &mut out[start..end]);
+        voice.process_loop(
+            &p,
+            gate.get(start..end).unwrap_or(&[]),
+            input,
+            returned.get(start..end).unwrap_or(&[]),
+            Some(before),
+            after,
+        );
+        start = end;
+    }
+    if let Some(bridge_at) = bridge_at {
+        let dry = out.clone();
+        for (b, (block, input)) in out
+            .chunks_mut(block_size)
+            .zip(dry.chunks(block_size))
+            .enumerate()
+        {
+            let t = (b * block_size) as f64 / f64::from(sample_rate);
+            bridge.process(&bridge_at(t), input, block);
+        }
+    }
+    out
 }

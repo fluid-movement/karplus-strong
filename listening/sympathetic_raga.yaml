@@ -1,0 +1,12 @@
+name: sympathetic_raga
+description: >
+  A sitar-ish patch: D3, the Bhairav tuning (scene 3 of 6, knob 0.6) with the
+  strings following the note, a little buzz and tension. Listen for the
+  shimmer after each pluck, and whether the buzz is a sitar or a kazoo.
+pitch: D3
+duration: 10s
+params: { decay: 0.6, buzz: 0.8, tension: 0.3, drive: 0.2, sym_level: 0.9, sym_scene: 0.6, sym_decay: 0.8, body_mix: 0.4, body_material: 0.5, body_track: 1 }
+plucks: [0s, 2.5s, 4s, 6.5s]
+assert:
+  non_finite_samples: { max: 0 }
+  peak: { min: 0.1, max: 1.0 }

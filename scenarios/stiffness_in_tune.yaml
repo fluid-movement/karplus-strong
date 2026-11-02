@@ -1,0 +1,17 @@
+name: stiffness_in_tune
+description: >
+  Stiffness at full on a low note: the upper partials stretch sharp, the
+  fundamental does not move, and the note rings as long as dialed (key
+  tracking up, decay 0.5 = 2 s). Measured: t60 1.99 s. The pitch is not
+  asserted here, because the comb fit reads a stretched series as a few cents
+  sharp (8 cents at C3); the property test `stiffness_keeps_the_fundamental_in_tune`
+  measures the fundamental itself, to a cent, from C2 to C6.
+pitch: C3
+duration: 3s
+params: { key_track: 1, decay: 0.5, stiffness: 1.0 }
+analysis: { from: 50ms, to: 2.5s }
+assert:
+  t60_s: { min: 1.7, max: 2.3 }
+  peak: { min: 0.15, max: 1.0 }
+  dc_offset_dbfs: { max: -50 }
+  non_finite_samples: { max: 0 }

@@ -16,6 +16,12 @@
  * its coefficients once per block. So inputs are collected for BLOCK samples,
  * the block is rendered, and played out while the next is collected: BLOCK
  * samples of latency, a third of a millisecond at 48 kHz.
+ *
+ * The right half of the panel is the bridge (K19-K22). The strings' sum goes
+ * through one shared body and the sympathetic strings (karplus_bridge_*) to
+ * the BRIDGE output. The loop jacks bring each string's delay line out to
+ * SEND and back from RETURN; the return is read one block late and the core
+ * is told so (karplus LOOP_LATENCY, 34 samples = two blocks and two cables).
  */
 
 #include "plugin.hpp"
@@ -51,6 +57,20 @@ struct KarplusStrong : Module {
         VEL_DECAY_PARAM,
         VEL_LENGTH_PARAM,
         PLUCK_PARAM,
+        STIFF_PARAM,
+        TENSION_PARAM,
+        BUZZ_PARAM,
+        TRIM_PARAM,
+        BODY_SHAPE_PARAM,
+        BODY_SIZE_PARAM,
+        BODY_MATERIAL_PARAM,
+        BODY_MIX_PARAM,
+        BODY_TRACK_PARAM,
+        SCENE_PARAM,
+        ROOT_PARAM,
+        LEVEL_PARAM,
+        RING_PARAM,
+        FOLLOW_PARAM,
         PARAMS_LEN
     };
     enum InputId {
@@ -62,9 +82,12 @@ struct KarplusStrong : Module {
         GATE_INPUT,
         VELOCITY_INPUT,
         AUDIO_INPUT,
+        RETURN_INPUT,
+        SHAPE_INPUT,
+        SCENE_INPUT,
         INPUTS_LEN
     };
-    enum OutputId { AUDIO_OUTPUT, OUTPUTS_LEN };
+    enum OutputId { AUDIO_OUTPUT, SEND_OUTPUT, BRIDGE_OUTPUT, OUTPUTS_LEN };
     enum LightId { LIGHTS_LEN };
 
     KarplusVoice* voices[karplus::MAX_CHANNELS] = {};
@@ -73,6 +96,13 @@ struct KarplusStrong : Module {
     float gate[karplus::MAX_CHANNELS][BLOCK] = {};
     float audio[karplus::MAX_CHANNELS][BLOCK] = {};
     float out[karplus::MAX_CHANNELS][BLOCK] = {};
+    float send[karplus::MAX_CHANNELS][BLOCK] = {};
+    /// The return, as collected during the previous block (what the core is
+    /// given) and during this one (what it will be given next).
+    float returned[karplus::MAX_CHANNELS][BLOCK] = {};
+    float returning[karplus::MAX_CHANNELS][BLOCK] = {};
+    KarplusBridge* bridge = NULL;
+    float bridgeOut[BLOCK] = {};
 
     KarplusStrong() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
@@ -119,10 +149,37 @@ struct KarplusStrong : Module {
         configInput(AUDIO_INPUT, "Exciter audio");
         configOutput(AUDIO_OUTPUT, "Audio");
 
+        // The bridge: loop stages, body, sympathetic strings.
+        KarplusBridgeParams b;
+        karplus_bridge_params_default(&b);
+        configParam(STIFF_PARAM, 0.f, 1.f, d.stiffness, "Stiffness");
+        configParam(TENSION_PARAM, 0.f, 1.f, d.tension, "Tension modulation");
+        configParam(BUZZ_PARAM, 0.f, 1.f, d.buzz, "Buzz");
+        configParam(TRIM_PARAM, 0.f, 1.f, 0.5f, "Outboard loop tuning trim");
+        configParam(BODY_SHAPE_PARAM, 0.f, 1.f, b.body_shape,
+                    "Body shape (string, bar, drum, plate)");
+        configParam(BODY_SIZE_PARAM, 0.f, 1.f, b.body_size, "Body size");
+        configParam(BODY_MATERIAL_PARAM, 0.f, 1.f, b.body_material,
+                    "Body material (wood to glass)");
+        configParam(BODY_MIX_PARAM, 0.f, 1.f, b.body_mix, "Body mix");
+        configSwitch(BODY_TRACK_PARAM, 0.f, 1.f, 0.f, "Body", {"Fixed in Hz", "Follows the note"});
+        configParam(SCENE_PARAM, 0.f, 1.f, b.scene,
+                    "Sympathetic tuning (octaves, major, minor, raga, tanpura, cluster)");
+        configParam(ROOT_PARAM, 0.f, 1.f, b.root, "Sympathetic root");
+        configParam(LEVEL_PARAM, 0.f, 1.f, b.level, "Sympathetic level");
+        configParam(RING_PARAM, 0.f, 1.f, b.decay, "Sympathetic ring time");
+        configSwitch(FOLLOW_PARAM, 0.f, 1.f, 1.f, "Sympathetic root", {"Fixed", "Follows the note"});
+        configInput(RETURN_INPUT, "Loop return");
+        configInput(SHAPE_INPUT, "Body shape CV");
+        configInput(SCENE_INPUT, "Sympathetic tuning CV");
+        configOutput(SEND_OUTPUT, "Loop send");
+        configOutput(BRIDGE_OUTPUT, "Bridge (body and sympathetic strings)");
+
         buildVoices(APP->engine->getSampleRate());
     }
 
     ~KarplusStrong() {
+        karplus_bridge_free(bridge);
         for (int c = 0; c < karplus::MAX_CHANNELS; c++) {
             karplus_voice_free(voices[c]);
         }
@@ -134,6 +191,8 @@ struct KarplusStrong : Module {
             karplus_voice_free(voices[c]);
             voices[c] = karplus_voice_new(rate, (uint32_t)(c + 1));
         }
+        karplus_bridge_free(bridge);
+        bridge = karplus_bridge_new(rate);
         cursor = 0;
     }
 
@@ -146,6 +205,7 @@ struct KarplusStrong : Module {
         for (int c = 0; c < karplus::MAX_CHANNELS; c++) {
             karplus_voice_reset(voices[c]);
         }
+        karplus_bridge_reset(bridge);
     }
 
     /// Every control for one channel.
@@ -185,7 +245,34 @@ struct KarplusStrong : Module {
         p.velocity_patched = inputs[VELOCITY_INPUT].isConnected() ? 1 : 0;
         p.velocity_volts = inputs[VELOCITY_INPUT].getPolyVoltage(c);
         p.manual_gate = params[PLUCK_PARAM].getValue() > 0.5f ? 1 : 0;
+
+        p.stiffness = params[STIFF_PARAM].getValue();
+        p.tension = params[TENSION_PARAM].getValue();
+        p.buzz = params[BUZZ_PARAM].getValue();
+        p.loop_return = inputs[RETURN_INPUT].isConnected() ? 1 : 0;
+        p.loop_trim_volts = karplus::trim_volts(params[TRIM_PARAM].getValue());
         return p;
+    }
+
+    /// The bridge's controls. The lead voice's pitch is channel 1's.
+    KarplusBridgeParams readBridgeControls() {
+        KarplusBridgeParams b;
+        karplus_bridge_params_default(&b);
+        b.root_volts = karplus::pitch_volts(params[PITCH_PARAM].getValue(),
+                                            inputs[VOCT_INPUT].getVoltage(0));
+        b.body_shape = karplus::unipolar(params[BODY_SHAPE_PARAM].getValue(), 1.f,
+                                         inputs[SHAPE_INPUT].getVoltage(0));
+        b.body_size = params[BODY_SIZE_PARAM].getValue();
+        b.body_material = params[BODY_MATERIAL_PARAM].getValue();
+        b.body_mix = params[BODY_MIX_PARAM].getValue();
+        b.body_track = params[BODY_TRACK_PARAM].getValue() > 0.5f ? 1 : 0;
+        b.scene = karplus::unipolar(params[SCENE_PARAM].getValue(), 1.f,
+                                    inputs[SCENE_INPUT].getVoltage(0));
+        b.root = params[ROOT_PARAM].getValue();
+        b.level = params[LEVEL_PARAM].getValue();
+        b.decay = params[RING_PARAM].getValue();
+        b.follow = params[FOLLOW_PARAM].getValue() > 0.5f ? 1 : 0;
+        return b;
     }
 
     void renderBlock() {
@@ -199,6 +286,9 @@ struct KarplusStrong : Module {
                 gate[c][i] = 0.f;
                 audio[c][i] = 0.f;
                 out[c][i] = 0.f;
+                send[c][i] = 0.f;
+                returned[c][i] = 0.f;
+                returning[c][i] = 0.f;
             }
         }
         channels = wanted;
@@ -206,9 +296,18 @@ struct KarplusStrong : Module {
         const bool audioPatched = inputs[AUDIO_INPUT].isConnected();
         for (int c = 0; c < channels; c++) {
             KarplusParams p = readControls(c);
-            karplus_voice_process(voices[c], &p, gate[c], audioPatched ? audio[c] : NULL,
-                                  out[c], BLOCK);
+            karplus_voice_process_loop(voices[c], &p, gate[c], audioPatched ? audio[c] : NULL,
+                                       p.loop_return ? returned[c] : NULL, send[c], out[c],
+                                       BLOCK);
+            // What came back during this block is for the next.
+            for (int i = 0; i < BLOCK; i++) {
+                returned[c][i] = returning[c][i];
+            }
         }
+
+        KarplusBridgeParams b = readBridgeControls();
+        karplus_bridge_process(bridge, &b, &out[0][0], (size_t)channels, (size_t)BLOCK, bridgeOut,
+                               (size_t)BLOCK);
     }
 
     void process(const ProcessArgs& args) override {
@@ -216,9 +315,14 @@ struct KarplusStrong : Module {
             gate[c][cursor] = inputs[GATE_INPUT].getPolyVoltage(c);
             audio[c][cursor] =
                 karplus::audio_from_volts(inputs[AUDIO_INPUT].getPolyVoltage(c));
+            returning[c][cursor] =
+                karplus::audio_from_volts(inputs[RETURN_INPUT].getPolyVoltage(c));
             outputs[AUDIO_OUTPUT].setVoltage(karplus::audio_to_volts(out[c][cursor]), c);
+            outputs[SEND_OUTPUT].setVoltage(karplus::audio_to_volts(send[c][cursor]), c);
         }
         outputs[AUDIO_OUTPUT].setChannels(channels);
+        outputs[SEND_OUTPUT].setChannels(channels);
+        outputs[BRIDGE_OUTPUT].setVoltage(karplus::audio_to_volts(bridgeOut[cursor]));
 
         if (++cursor >= BLOCK) {
             cursor = 0;
@@ -300,6 +404,50 @@ struct KarplusStrongWidget : ModuleWidget {
                                                  KarplusStrong::AUDIO_INPUT));
         addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(70.28f, 116.5f)), module,
                                                    KarplusStrong::AUDIO_OUTPUT));
+
+        // The right half: BRIDGE_X, RCOLUMNS, and the rows in panel.py.
+        const float bx = 81.28f;
+        const float rcol[4] = {bx + 12.89f, bx + 31.39f, bx + 49.89f, bx + 68.39f};
+
+        // LOOP_Y: stiffness, tension, buzz, and the outboard loop's trim.
+        const int loop[4] = {KarplusStrong::STIFF_PARAM, KarplusStrong::TENSION_PARAM,
+                             KarplusStrong::BUZZ_PARAM, KarplusStrong::TRIM_PARAM};
+        for (int i = 0; i < 4; i++) {
+            addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(rcol[i], 25.0f)), module,
+                                                         loop[i]));
+        }
+
+        // BODY_Y: the body, then its switch.
+        const int body[4] = {KarplusStrong::BODY_SHAPE_PARAM, KarplusStrong::BODY_SIZE_PARAM,
+                             KarplusStrong::BODY_MATERIAL_PARAM, KarplusStrong::BODY_MIX_PARAM};
+        for (int i = 0; i < 4; i++) {
+            addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(rcol[i], 51.0f)), module,
+                                                         body[i]));
+        }
+        addParam(createParamCentered<CKSS>(mm2px(Vec(rcol[0], 63.5f)), module,
+                                           KarplusStrong::BODY_TRACK_PARAM));
+
+        // STRINGS_Y: the sympathetic strings, then their switch.
+        const int strings[4] = {KarplusStrong::SCENE_PARAM, KarplusStrong::ROOT_PARAM,
+                                KarplusStrong::LEVEL_PARAM, KarplusStrong::RING_PARAM};
+        for (int i = 0; i < 4; i++) {
+            addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(rcol[i], 88.0f)), module,
+                                                         strings[i]));
+        }
+        addParam(createParamCentered<CKSS>(mm2px(Vec(rcol[0], 99.5f)), module,
+                                           KarplusStrong::FOLLOW_PARAM));
+
+        // JACK_Y, right half.
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(bx + 9.5f, 116.5f)), module,
+                                                   KarplusStrong::SEND_OUTPUT));
+        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(bx + 24.0f, 116.5f)), module,
+                                                 KarplusStrong::RETURN_INPUT));
+        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(bx + 38.5f, 116.5f)), module,
+                                                 KarplusStrong::SHAPE_INPUT));
+        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(bx + 53.0f, 116.5f)), module,
+                                                 KarplusStrong::SCENE_INPUT));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(bx + 70.28f, 116.5f)), module,
+                                                   KarplusStrong::BRIDGE_OUTPUT));
     }
 };
 

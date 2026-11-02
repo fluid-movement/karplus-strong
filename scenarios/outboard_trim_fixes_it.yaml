@@ -1,0 +1,14 @@
+name: outboard_trim_fixes_it
+description: >
+  `outboard_dark_is_flat` with TRIM turned up by the amount it went flat
+  (42 cents is 0.5 + 12 * 42/1200 = 0.92 of the knob). In tune again, to a
+  few cents (measured -0.9).
+pitch: C3
+duration: 3s
+outboard: { lowpass_hz: 800 }
+params: { key_track: 1, decay: 0.5, loop_trim: 0.92 }
+analysis: { from: 50ms, to: 2.5s }
+assert:
+  pitch_error_cents: { min: -2.5, max: 2.5 }
+  peak: { min: 0.05, max: 1.0 }
+  non_finite_samples: { max: 0 }

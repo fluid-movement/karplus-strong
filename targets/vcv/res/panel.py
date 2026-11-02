@@ -17,9 +17,10 @@ import pathlib
 # --- Geometry ------------------------------------------------------------
 
 HP = 5.08
-WIDTH = 16 * HP
+LEFT_W = 16 * HP     # the strings
+WIDTH = 32 * HP      # and the bridge beside them
 HEIGHT = 128.5
-CX = WIDTH / 2
+CX = LEFT_W / 2
 
 PANEL = "#efece6"
 EDGE = "#c8c4bc"
@@ -142,10 +143,34 @@ BUTTON_LABEL = "PLUCK"
 JACK_LABEL_Y = 110.5
 JACK_Y = 116.5
 JACKS = [(9.5, "V/OCT"), (24.0, "GATE"), (38.5, "VEL"), (53.0, "IN")]
-OUT_X = WIDTH - 11.0
+OUT_X = LEFT_W - 11.0
 OUT_PLATE = (OUT_X - 8.0, 106.5, 16.0, 16.0)
 
 DIVIDERS = [52.0, 72.0, 104.0]
+
+# The right half: loop stages, body, sympathetic strings, and the jacks.
+BX = LEFT_W
+RCOLUMNS = [BX + 12.89 + i * 18.5 for i in range(4)]
+LOOP_HEADER_Y = 14.2
+LOOP_LABEL_Y = 20.0
+LOOP_Y = 25.0
+LOOP_ROW = ["STIFF", "TENSION", "BUZZ", "TRIM"]
+BODY_HEADER_Y = 37.5
+BODY_LABEL_Y = 44.5
+BODY_Y = 51.0
+BODY_ROW = ["SHAPE", "SIZE", "MATERIAL", "MIX"]
+BODY_SWITCH_Y = 63.5
+STRINGS_HEADER_Y = 74.0
+STRINGS_LABEL_Y = 81.0
+STRINGS_Y = 88.0
+STRINGS_ROW = ["SCENE", "ROOT", "LEVEL", "RING"]
+STRINGS_SWITCH_Y = 99.5
+RDIVIDERS = [33.0, 69.5, 104.0]
+RJACKS = [(BX + 9.5, "SEND", True), (BX + 24.0, "RETURN", False),
+          (BX + 38.5, "SHAPE", False), (BX + 53.0, "SCENE", False)]
+BRIDGE_X = BX + 70.28
+BRIDGE_PLATE = (BRIDGE_X - 8.0, 106.5, 16.0, 16.0)
+SEND_PLATE = (BX + 9.5 - 8.0, 106.5, 16.0, 16.0)
 
 
 def build():
@@ -165,8 +190,12 @@ def build():
     for y in DIVIDERS:
         o.append(
             '<line x1="4" y1="%.3f" x2="%.3f" y2="%.3f" stroke="%s" '
-            'stroke-width="0.3"/>' % (y, WIDTH - 4, y, EDGE)
+            'stroke-width="0.3"/>' % (y, LEFT_W - 4, y, EDGE)
         )
+    o.append(
+        '<line x1="%.3f" y1="6" x2="%.3f" y2="%.3f" stroke="%s" stroke-width="0.3"/>'
+        % (LEFT_W, LEFT_W, HEIGHT - 6, EDGE)
+    )
 
     for cx, label in zip(COLUMNS, MAIN):
         o += text(label, cx, MAIN_LABEL_Y, cap=2.5)
@@ -194,6 +223,41 @@ def build():
     o += text("OUT", OUT_X, JACK_LABEL_Y, cap=2.4, fill=PLATE_INK)
     for cx, label in JACKS:
         o += text(label, cx, JACK_LABEL_Y, cap=2.4)
+
+    # --- The right half --------------------------------------------------
+    o += text("BODY / STRINGS", BX + LEFT_W / 2, 8.6, cap=2.8, weight=0.16)
+    for y in RDIVIDERS:
+        o.append(
+            '<line x1="%.3f" y1="%.3f" x2="%.3f" y2="%.3f" stroke="%s" '
+            'stroke-width="0.3"/>' % (BX + 4, y, WIDTH - 4, y, EDGE)
+        )
+    mid = (RCOLUMNS[0] + RCOLUMNS[3]) / 2
+    o += text("LOOP", mid, LOOP_HEADER_Y, cap=1.9, fill=FAINT)
+    for cx, label in zip(RCOLUMNS, LOOP_ROW):
+        o += text(label, cx, LOOP_LABEL_Y, cap=2.2)
+    o += text("BODY", mid, BODY_HEADER_Y, cap=1.9, fill=FAINT)
+    for cx, label in zip(RCOLUMNS, BODY_ROW):
+        o += text(label, cx, BODY_LABEL_Y, cap=2.2)
+    o += text("FIXED / TRACKS", RCOLUMNS[0] + 5.0, BODY_SWITCH_Y + 1.0, cap=1.8,
+              anchor="start", fill=FAINT)
+    o += text("STRINGS", mid, STRINGS_HEADER_Y, cap=1.9, fill=FAINT)
+    for cx, label in zip(RCOLUMNS, STRINGS_ROW):
+        o += text(label, cx, STRINGS_LABEL_Y, cap=2.2)
+    o += text("FIXED / FOLLOWS", RCOLUMNS[0] + 5.0, STRINGS_SWITCH_Y + 1.0, cap=1.8,
+              anchor="start", fill=FAINT)
+
+    for plate in (BRIDGE_PLATE, SEND_PLATE):
+        x, y, w, h = plate
+        o.append(
+            '<rect x="%.3f" y="%.3f" width="%.3f" height="%.3f" rx="1.4" fill="%s"/>'
+            % (x, y, w, h, PLATE)
+        )
+    o += text("BRIDGE", BRIDGE_X, JACK_LABEL_Y, cap=2.4, fill=PLATE_INK)
+    for cx, label, is_output in RJACKS:
+        o += text(label, cx, JACK_LABEL_Y, cap=2.2 if len(label) > 5 else 2.4,
+                  fill=PLATE_INK if is_output else INK)
+    o += text("CV", RJACKS[2][0], JACK_Y + 8.4, cap=1.7, fill=FAINT)
+    o += text("CV", RJACKS[3][0], JACK_Y + 8.4, cap=1.7, fill=FAINT)
 
     o.append("</svg>")
     return "\n".join(o) + "\n"

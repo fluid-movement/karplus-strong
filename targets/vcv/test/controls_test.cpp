@@ -53,6 +53,11 @@ int main() {
     check(position(-3.0f, 2) == 0, "clamped below");
     check(position(nan, 7) == 0, "NaN is the first position");
 
+    check(trim_volts(0.5f) == 0.0f, "the trim is centred at half");
+    close_to(trim_volts(1.0f), 1.0f / 24.0f, "a half semitone at the top");
+    close_to(trim_volts(0.0f), -1.0f / 24.0f, "and at the bottom");
+    close_to(trim_volts(9.0f), 1.0f / 24.0f, "clamped");
+
     check(voice_count(0, 0) == 1, "nothing patched is one voice");
     check(voice_count(4, 1) == 4, "a poly pitch cable sets the count");
     check(voice_count(1, 6) == 6, "so does a poly gate cable");

@@ -38,6 +38,14 @@ inline float pitch_volts(float knob_volts, float voct_volts) {
     return knob_volts + voct_volts;
 }
 
+/**
+ * The outboard loop's tuning trim: a knob at 0.5 is no trim, and its ends are
+ * half a semitone either side. In volts of pitch, applied to the loop alone.
+ */
+inline float trim_volts(float knob) {
+    return (clamp(knob, 0.0f, 1.0f) - 0.5f) / 12.0f;
+}
+
 /** Eurorack audio is +/-5 V; the core works at +/-1. */
 inline float audio_from_volts(float volts) {
     return volts / 5.0f;

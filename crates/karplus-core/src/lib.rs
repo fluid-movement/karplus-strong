@@ -28,22 +28,31 @@
     )
 )]
 
+mod bridge;
 mod delay;
 mod filter;
 pub mod math;
 mod params;
+mod ramp;
 mod voice;
 
+pub use bridge::{
+    Bridge, BridgeParams, BODY_MODES, SCENES, SHAPES, SYMPATHETIC_LEN, SYMPATHETIC_STRINGS,
+};
 pub use delay::{DelayLine, MIN_DELAY};
 pub use filter::{
-    dc_blocker_response, fathom_dc_coefficient, one_pole_response, LoopFilter, Response,
+    allpass_response, dc_blocker_response, fathom_dc_coefficient, one_pole_response, LoopFilter,
+    Response,
 };
 pub use params::{
-    brightness_ratio, burst_periods, damp_seconds, decay_seconds, pick_fraction, tone_ratio,
-    ExciterKind, Params, DECAY_MAX_S, DECAY_MIN_S, DEFAULT_BRIGHTNESS, DEFAULT_DECAY,
-    DEFAULT_LENGTH, DRIVE_MAX_GAIN, MAX_CUTOFF,
+    allpass_coefficient, brightness_ratio, burst_periods, damp_seconds, decay_seconds,
+    pick_fraction, stiffness_delay, tone_ratio, ExciterKind, Params, DECAY_MAX_S, DECAY_MIN_S,
+    DEFAULT_BRIGHTNESS, DEFAULT_DECAY, DEFAULT_LENGTH, DRIVE_MAX_GAIN, MAX_CUTOFF,
+    STIFFNESS_MAX_DELAY, STIFFNESS_MAX_FRACTION, TENSION_MAX_FRACTION,
 };
-pub use voice::{Voice, GATE_HIGH_V, GATE_LOW_V, MAX_LOOP_GAIN, MIN_VELOCITY, STRING_LEN};
+pub use voice::{
+    Voice, GATE_HIGH_V, GATE_LOW_V, LOOP_LATENCY, MAX_LOOP_GAIN, MIN_VELOCITY, STRING_LEN,
+};
 
 /// Re-exported so that shells and tests name the same 0 V as the core.
 pub use fathom_core::ZERO_VOLT_HZ;

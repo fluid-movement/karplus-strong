@@ -1,0 +1,15 @@
+name: buzz_sitar
+description: >
+  A low note with the buzz and drive both up: bounded, in tune, audible, and
+  free of DC. The buzz squeezes the positive swing against a fixed knee, so a
+  hard pluck buzzes and the tail comes clean. Measured at D2: pitch within a
+  cent of the plain string.
+pitch: D2
+duration: 6s
+params: { buzz: 1.0, drive: 0.5, decay: 0.85, brightness: 0.7 }
+analysis: { from: 100ms, to: 5s }
+assert:
+  pitch_error_cents: { min: -3.0, max: 3.0 }
+  peak: { min: 0.2, max: 1.0 }
+  dc_offset_dbfs: { max: -45 }
+  non_finite_samples: { max: 0 }

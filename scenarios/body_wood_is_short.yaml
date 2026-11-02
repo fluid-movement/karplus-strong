@@ -1,0 +1,11 @@
+name: body_wood_is_short
+description: >
+  The same strike with the material at wood: the body is damped, and has gone
+  by 0.6 s. The opposite end of `body_rings_alone`.
+pitch: C3
+duration: 3s
+params: { decay: 0.0, body_mix: 1.0, body_material: 0.0, body_track: 1 }
+analysis: { from: 600ms, to: 3s }
+assert:
+  rms_dbfs: { max: -100 }
+  non_finite_samples: { max: 0 }

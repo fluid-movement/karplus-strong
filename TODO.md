@@ -9,6 +9,30 @@
 - [x] Scenarios, listening set, `just verify`
 - [x] `docs/fathom-reuse.md`: what is reusable, what is not
 
+## Done: the organic-sound round (K19–K26)
+
+- [x] STIFF (dispersion allpass pair), TENSION, BUZZ in the loop; SEND/RETURN, TRIM
+- [x] `Bridge`: body (12 modes, SHAPE/SIZE/MATERIAL/MIX/TRACK) and 8 sympathetic
+      strings (6 tunings, SCENE morph, ROOT, FOLLOW, LEVEL, RING)
+- [x] FFI, header, shim, 32 HP panel, scenarios, listening patches, property tests
+- [x] Decisions K19–K26, with the constants to retune by ear
+
+## Next — from that round
+
+- [ ] **Listen** to the new patches in `listening/` (`just render`): piano_stiff_low,
+      tension_chirp, body_shapes, body_material_wood_to_glass, sympathetic_raga,
+      tanpura_drone, sympathetic_morph, outboard_dark_loop. K26 lists the constants.
+- [ ] **Build the plugin against the SDK** (`just vcv`). The shim's right half was
+      written without the SDK (it could not be downloaded). Then patch a filter
+      into SEND and RETURN and check the tuning and the top note (K22).
+- [ ] Per-sample processing, if the outboard loop is liked: the 34-sample latency
+      limits the top note to about 1.2 kHz (K22). It means revisiting K17.
+- [ ] A two-way bridge: the body and sympathetic strings feeding back into the
+      voices' loops (K23). Needs the same per-sample step.
+- [ ] CV and attenuverters for the new knobs, if the panel can take it.
+- [ ] The body follows the lead voice only (K24); a chord leaves it on the first note.
+- [ ] Check the plate and guitar-body mode tables against a source (K24).
+
 ## Next
 
 - [ ] **Listen.** `just render`, then `listening/out/`. Nothing here has been
@@ -30,8 +54,8 @@
 
 ## Ideas carried over from the JUCE roadmap
 
-Still ideas, each needing a design decision first: stiffness/dispersion
-allpass in the loop, coupled detuned string pairs, sympathetic resonance
-between voices, a body resonator, a continuous (bowed) exciter. Pitch bend,
+Still ideas, each needing a design decision first: coupled detuned string
+pairs, a continuous (bowed) exciter. (Stiffness, sympathetic resonance and a
+body resonator are in: K19–K25.) Pitch bend,
 glide, MPE and strum are what V/OCT, slew limiters and poly cables already do
 on a modular, so they are not planned.

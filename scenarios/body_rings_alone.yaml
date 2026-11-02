@@ -1,0 +1,12 @@
+name: body_rings_alone
+description: >
+  The shortest decay, so the string is gone after a tenth of a second, and a
+  glass body at full mix: what is heard from 0.6 s on is the body alone,
+  ringing. The opposing constraint is `body_off_is_silent`.
+pitch: C3
+duration: 3s
+params: { decay: 0.0, body_mix: 1.0, body_material: 1.0, body_track: 1 }
+analysis: { from: 600ms, to: 3s }
+assert:
+  rms_dbfs: { min: -45, max: -25 }
+  non_finite_samples: { max: 0 }

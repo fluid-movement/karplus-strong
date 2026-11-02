@@ -46,6 +46,41 @@ The delay length, loop gain and comb delay glide linearly to their new values
 over each block, so nothing steps. A gate edge mid-block recomputes them for
 the rest of the block.
 
+## The organic additions (K19–K26)
+
+Per voice, inside the loop, after the DC blocker and before the gain:
+
+```
+delay ─► loop lowpass ─► buzz ─► DC blocker ─► dispersion (2 allpass) ─► × gain ─► (+) ─► shape
+  ▲        (or RETURN)    K21        K12            K19                              ▲
+  └─ read at (delay − tension stretch)  K20                                    pluck + audio in
+  └─ also out at SEND (K22)
+```
+
+Shared by all voices, one `Bridge` per module (K23–K25), fed by the sum of the
+strings and heard on its own jack:
+
+```
+voices ─► sum ─┬──────────────────────────────► × (1 − mix) ──┐
+               ├─► body: 12 modes, SHAPE/SIZE/MATERIAL ─► × mix ─► (+) ─► soft knee ─► BRIDGE
+               └─► sympathetic: 8 lines, SCENE/ROOT/RING ──────────────┘
+```
+
+| Control | Law | Default |
+| --- | --- | --- |
+| STIFF | DC delay of each of two allpass stages: `1 + k²·(top − 1)` samples, `top` = min(24, 20% of the period) | 0 |
+| TENSION | delay shortened by `k × 12% × period × min(1, energy/0.03)`, energy = mean square over 3 periods | 0 |
+| BUZZ | positive swings squeezed against a knee of 0.12; crossfade by `k` | 0 |
+| TRIM | ±½ semitone on the loop's delay, centre none (knob `0.5`) | 0.5 |
+| SHAPE | log-frequency morph: string, bar, drum, plate | 0 |
+| SIZE | fixed: first mode `800 Hz · 2^(−5k)`; tracked: `note · 2^(2 − 4k)` | 0.5 |
+| MATERIAL | first mode T60 `0.03 s · 2^(7k)`, higher modes die as ratio^−(1 − 0.8k) | 0.5 |
+| MIX | `dry·(1 − k) + body·k` | 0 |
+| SCENE | six tunings, morph with a 20% flat around each | 0 |
+| ROOT | ±2 octaves around the followed note or a fixed C3 | 0.5 |
+| LEVEL | listening gain of the sympathetic strings | 0 |
+| RING | T60 of all eight, `0.5 s · 2^(5.32k)` (0.5 – 20 s) | 0.6 |
+
 ## Knob laws
 
 All in `crates/karplus-core/src/params.rs`. A knob is `0..1`.
@@ -76,3 +111,14 @@ All in `crates/karplus-core/src/params.rs`. A knob is `0..1`.
 - The same seed gives the same output, bit for bit.
 - Level within a decibel at 44.1, 96 and 192 kHz against 48.
 - Fathom's DC blocker behaves as the tuning maths predicts.
+- Stiffness leaves the fundamental within a cent and the T60 within 15%,
+  stretches partials 4 and 8, and does nothing at zero.
+- Tension chirps a hard pluck down and settles; buzz squeezes one side of
+  the wave and keeps tuning, sustain and DC.
+- The bridge is finite and inside full scale at all 1024 corners with sixteen
+  full-scale voices, a wire at its defaults, and free of subnormals after 90 s.
+- Every body mode and every sympathetic string of every scene is within a
+  cent or two of its table; the tracked body moves with the note, the fixed
+  one does not; turning SHAPE, SIZE or SCENE while ringing does not click.
+- An outboard loop that does nothing is in tune; one that is dark goes flat
+  and TRIM brings it back; an unpatched RETURN is ignored bit for bit.

@@ -1,0 +1,11 @@
+name: body_off_is_silent
+description: >
+  `body_rings_alone` with the mix at nothing: after the string has gone there
+  is nothing left. Without this, a body that rang whatever the mix would pass.
+pitch: C3
+duration: 3s
+params: { decay: 0.0, body_mix: 0.0, body_material: 1.0, body_track: 1 }
+analysis: { from: 600ms, to: 3s }
+assert:
+  rms_dbfs: { max: -100 }
+  non_finite_samples: { max: 0 }

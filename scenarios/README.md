@@ -36,6 +36,8 @@ params:                         # knob positions, 0..1, held for the whole rende
 automation:                     # values that move; shapes linear | exponential | smooth
   pitch_volts: { from: 0, to: 1, over: 50ms, start: 500ms }
 
+outboard: { lowpass_hz: 800 }   # a simulated filter in the loop, with the real latency (K22)
+
 plucks:                         # default: one trigger at 0s; [] for none
   - 0s                          # a 1 ms trigger
   - { at: 500ms, held: 300ms, velocity: 6 }   # gate length, VEL in volts
@@ -50,7 +52,12 @@ assert:                         # required, never empty
 
 Parameters: `pitch_volts`, `decay`, `brightness`, `pick`, `tone`, `length`,
 `drive`, `damp`, `humanize`, `key_track`, `velocity_brightness`,
-`velocity_decay`, `velocity_length`. Set `pitch` or `pitch_volts`, not both.
+`velocity_decay`, `velocity_length`; the loop stages `stiffness`, `tension`,
+`buzz`, `loop_trim` (0.5 is centre); and the bridge: `body_shape`,
+`body_size`, `body_material`, `body_mix`, `body_track` (0 or 1), `sym_scene`,
+`sym_root`, `sym_level`, `sym_decay`, `sym_follow` (0 or 1). Setting any
+`body_*` or `sym_*` runs the render through the bridge, and the measured
+signal is then the BRIDGE output. Set `pitch` or `pitch_volts`, not both.
 The laws behind the knob positions are in `docs/dsp.md`.
 
 Unknown fields, parameters or metrics are errors, and so is an empty

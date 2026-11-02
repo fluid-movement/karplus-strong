@@ -1,0 +1,16 @@
+name: tension_chirp
+description: >
+  TENSION at full. Plucks from soft to hard: the hard ones start sharp and
+  fall into tune, like a guitar string plucked too hard. The soft ones barely
+  move. The most telling thing in the set about whether the range is right.
+pitch: A2
+duration: 8s
+params: { tension: 1.0, decay: 0.75 }
+plucks:
+  - { at: 0s, velocity: 2 }
+  - { at: 2s, velocity: 5 }
+  - { at: 4s, velocity: 8 }
+  - { at: 6s, velocity: 10 }
+assert:
+  non_finite_samples: { max: 0 }
+  peak: { min: 0.1, max: 1.0 }

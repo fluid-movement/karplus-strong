@@ -7,7 +7,7 @@ use fathom_harness::scenario::Bound;
 use fathom_harness::Result;
 
 use crate::metrics::measure;
-use crate::render::{render_in_blocks, volts_to_hz};
+use crate::render::{render_chain, volts_to_hz};
 use crate::scenario::{AudioIn, Scenario};
 
 /// One assertion's outcome.
@@ -67,13 +67,20 @@ pub fn run(s: &Scenario) -> Outcome {
     let len = s.duration.samples(s.sample_rate);
     let audio = s.audio_in.map(|AudioIn { noise: level }| noise(len, level));
     let plucks: Vec<_> = s.plucks().iter().map(|p| p.pluck()).collect();
-    let samples = render_in_blocks(
+    let mut bridge_at = |t: f64| s.bridge_params_at(t);
+    let samples = render_chain(
         s.block_size,
         &plucks,
         s.duration.0,
         sr,
         s.seed,
         |t| s.params_at(t),
+        if s.uses_bridge() {
+            Some(&mut bridge_at)
+        } else {
+            None
+        },
+        s.outboard.map(|o| o.lowpass_hz),
         audio.as_deref(),
     );
 

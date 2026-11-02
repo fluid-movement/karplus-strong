@@ -27,12 +27,14 @@
 //!   loud one run away, whatever is patched into the audio input.
 
 use crate::delay::{DelayLine, MIN_DELAY};
-use crate::filter::{dc_blocker_response, fathom_dc_coefficient, LoopFilter};
+use crate::filter::{allpass_response, dc_blocker_response, fathom_dc_coefficient, LoopFilter};
 use crate::math::{flush_denormal, soft_knee, tanh, unit, Rng};
 use crate::params::{
-    brightness_ratio, burst_periods, damp_seconds, decay_seconds, pick_fraction, tone_ratio,
-    ExciterKind, Params, DRIVE_MAX_GAIN, MAX_CUTOFF,
+    allpass_coefficient, brightness_ratio, burst_periods, damp_seconds, decay_seconds,
+    pick_fraction, stiffness_delay, tone_ratio, ExciterKind, Params, DRIVE_MAX_GAIN, MAX_CUTOFF,
+    TENSION_MAX_FRACTION,
 };
+use crate::ramp::Ramp;
 use fathom_core::{clamp, exp2, increment_from_turns, sin_turns, DcBlocker, Phase, ZERO_VOLT_HZ};
 
 /// Length of the string's delay line. At 48 kHz the lowest note is 5.9 Hz;
@@ -124,34 +126,41 @@ const MAX_BURST: f32 = 65_536.0;
 /// Lagrange taps and the filters' delay no longer fit inside one period.
 const MIN_PERIOD: f32 = 4.0;
 
-/// A value that moves linearly to a target over a block.
+/// Samples between a sample leaving SEND and its answer arriving at RETURN
+/// when the loop goes out through two cables and the shim's 16-sample blocks
+/// (K22): one block to play out, one cable out, one cable back, and one block
+/// to collect.
+pub const LOOP_LATENCY: f32 = 34.0;
+
+/// The knee of the buzz: a positive swing above about this is squeezed. Fixed,
+/// not relative to the string's level: a hard-plucked note buzzes, and the
+/// buzz fades away as it dies, as on a sitar. (A knee that follows the level
+/// buzzes every amplitude alike, and was tried first: it also took a third
+/// of the note's sustain with it, and left DC. K21 has the numbers.)
+const BUZZ_KNEE: f32 = 0.12;
+
+/// How long the string's energy is averaged for tension modulation, in
+/// periods. Short enough to follow a pluck, long enough not to follow the
+/// waveform.
+const TENSION_PERIODS: f32 = 3.0;
+
+/// Mean-square level that counts as a fully driven string for tension
+/// modulation. A default pluck at full velocity sits near this for its first tenth of a second.
+const TENSION_FULL_ENERGY: f32 = 0.03;
+
+/// First-order allpass `(a + z⁻¹)/(1 + a·z⁻¹)`.
 #[derive(Debug, Clone, Copy, Default)]
-struct Ramp {
-    value: f32,
-    step: f32,
+struct Allpass {
+    x1: f32,
+    y1: f32,
 }
 
-impl Ramp {
-    fn aim(&mut self, target: f32, samples: usize) {
-        self.step = if samples > 0 {
-            (target - self.value) / samples as f32
-        } else {
-            0.0
-        };
-        if samples == 0 {
-            self.value = target;
-        }
-    }
-
-    fn jump(&mut self, target: f32) {
-        self.value = target;
-        self.step = 0.0;
-    }
-
-    fn next(&mut self) -> f32 {
-        let value = self.value;
-        self.value += self.step;
-        value
+impl Allpass {
+    fn process(&mut self, a: f32, x: f32) -> f32 {
+        let y = flush_denormal(a * x + self.x1 - a * self.y1);
+        self.x1 = x;
+        self.y1 = y;
+        y
     }
 }
 
@@ -167,6 +176,10 @@ struct Targets {
     drive_gain: f32,
     drive_mix: f32,
     sine_increment: i32,
+    dispersion: f32,
+    tension: f32,
+    energy_rate: f32,
+    buzz: f32,
 }
 
 /// One Karplus-Strong string.
@@ -179,6 +192,12 @@ pub struct Voice {
     loop_filter: LoopFilter,
     tone_filter: LoopFilter,
     dc: DcBlocker,
+    dispersion_stages: [Allpass; 2],
+    dispersion: Ramp,
+    tension: Ramp,
+    buzz: Ramp,
+    energy: f32,
+    energy_rate: f32,
     delay: Ramp,
     gain: Ramp,
     comb_delay: Ramp,
@@ -219,6 +238,12 @@ impl Voice {
             loop_filter: LoopFilter::open(),
             tone_filter: LoopFilter::open(),
             dc: DcBlocker::new(rate),
+            dispersion_stages: [Allpass::default(); 2],
+            dispersion: Ramp::default(),
+            tension: Ramp::default(),
+            buzz: Ramp::default(),
+            energy: 0.0,
+            energy_rate: 0.01,
             delay: Ramp::default(),
             gain: Ramp::default(),
             comb_delay: Ramp::default(),
@@ -252,6 +277,12 @@ impl Voice {
         self.loop_filter = LoopFilter::open();
         self.tone_filter = LoopFilter::open();
         self.dc = DcBlocker::new(self.sample_rate);
+        self.dispersion_stages = [Allpass::default(); 2];
+        self.dispersion = Ramp::default();
+        self.tension = Ramp::default();
+        self.buzz = Ramp::default();
+        self.energy = 0.0;
+        self.energy_rate = 0.01;
         self.delay = Ramp::default();
         self.gain = Ramp::default();
         self.comb_delay = Ramp::default();
@@ -287,6 +318,26 @@ impl Voice {
     /// down and summed with the burst before the tone filter. Either may be shorter than
     /// `out`, empty included; missing samples are zero.
     pub fn process(&mut self, p: &Params, gate: &[f32], audio_in: &[f32], out: &mut [f32]) {
+        self.process_loop(p, gate, audio_in, &[], None, out);
+    }
+
+    /// [`Voice::process`] with the loop brought out to the panel (K22).
+    ///
+    /// `send`, if given, is filled with what leaves the delay line: the signal
+    /// an outboard filter should treat. `loop_return` is what comes back, and
+    /// is used only when [`Params::loop_return`] says something is patched;
+    /// then it stands in for the loop's own lowpass, and the delay line is
+    /// shortened by [`LOOP_LATENCY`] so that the trip through the cables is
+    /// part of the string. Missing samples count as zero.
+    pub fn process_loop(
+        &mut self,
+        p: &Params,
+        gate: &[f32],
+        audio_in: &[f32],
+        loop_return: &[f32],
+        mut send: Option<&mut [f32]>,
+        out: &mut [f32],
+    ) {
         let len = out.len();
         if len == 0 {
             return;
@@ -296,9 +347,14 @@ impl Voice {
 
         let gates = gate.iter().copied().chain(core::iter::repeat(0.0));
         let inputs = audio_in.iter().copied().chain(core::iter::repeat(0.0));
+        let returns = loop_return.iter().copied().chain(core::iter::repeat(0.0));
         let manual = if p.manual_gate { 10.0 } else { 0.0 };
 
-        for (i, (sample, (gate_v, input))) in out.iter_mut().zip(gates.zip(inputs)).enumerate() {
+        for (i, (sample, ((gate_v, input), returned))) in out
+            .iter_mut()
+            .zip(gates.zip(inputs).zip(returns))
+            .enumerate()
+        {
             let level = if gate_v > manual { gate_v } else { manual };
             if !self.gate_high && level >= GATE_HIGH_V {
                 self.gate_high = true;
@@ -318,10 +374,28 @@ impl Voice {
             let picked = 0.5 * (excitation - self.comb.read(self.comb_delay.next()));
             self.comb.write(excitation);
 
-            let delayed = self.string.read(self.delay.next());
-            let filtered = self.dc.process(self.loop_filter.process(delayed));
-            let x = self.gain.next() * filtered + self.drive_gain * picked;
+            // Tension: a string stretched by its own swing runs sharp, and
+            // comes back down as the swing dies.
+            let stretch = self.tension.next() * self.energy_unit();
+            let delayed = self.string.read(self.delay.next() - stretch);
+            if let Some(slot) = send.as_deref_mut().and_then(|s| s.get_mut(i)) {
+                *slot = delayed;
+            }
+            // The internal lowpass keeps running when the return is patched,
+            // so that unplugging it does not meet a stale filter.
+            let internal = self.loop_filter.process(delayed);
+            let damped = if p.loop_return {
+                soft_knee(finite(returned))
+            } else {
+                internal
+            };
+            let buzzed = buzz(damped, self.buzz.next());
+            let filtered = self.dc.process(buzzed);
+            let dispersed = self.disperse(filtered);
+            let x = self.gain.next() * dispersed + self.drive_gain * picked;
             let written = flush_denormal(shape(x, self.drive_mix));
+            self.energy =
+                flush_denormal(self.energy + self.energy_rate * (written * written - self.energy));
             self.string.write(written);
             // The output is what goes into the line, not what comes out of
             // it: bounded by the shaper, where an interpolated read can
@@ -329,6 +403,19 @@ impl Voice {
             // plucked rather than a period later.
             *sample = written;
         }
+    }
+
+    /// The string's recent energy as a fraction of a fully driven string.
+    fn energy_unit(&self) -> f32 {
+        clamp(self.energy / TENSION_FULL_ENERGY, 0.0, 1.0)
+    }
+
+    /// Two dispersion allpasses in series.
+    fn disperse(&mut self, x: f32) -> f32 {
+        let a = self.dispersion.next();
+        let [first, second] = &mut self.dispersion_stages;
+        let y = first.process(a, x);
+        second.process(a, y)
     }
 
     /// The current pitch, in Hz, after clamping and humanize.
@@ -358,13 +445,35 @@ impl Voice {
         let decay =
             decay_seconds(p.decay - VELOCITY_KNOB_REACH * unit(p.velocity_decay) * softness);
 
-        // What the loop's filters do to the fundamental.
-        let response =
-            crate::filter::one_pole_response(loop_coefficient, turns).then(dc_blocker_response(
-                fathom_dc_coefficient(frequency / DC_CORNER_DIVISOR, rate),
-                turns,
-            ));
-        let delay = period - response.delay;
+        // What the loop's filters do to the fundamental. With an outboard
+        // loop the lowpass is not in the circuit; whatever the outboard
+        // filter does to level and phase is its owner's to correct (the trim).
+        let blocker = dc_blocker_response(
+            fathom_dc_coefficient(frequency / DC_CORNER_DIVISOR, rate),
+            turns,
+        );
+        let response = if p.loop_return {
+            blocker
+        } else {
+            crate::filter::one_pole_response(loop_coefficient, turns).then(blocker)
+        };
+
+        // The dispersion allpass: two identical stages whose DC delay is the
+        // knob's. At rest each is one sample of plain delay, which the line
+        // gives up, so a stiffness of nothing is the same string.
+        let stage_delay = stiffness_delay(p.stiffness, period);
+        let dispersion = allpass_coefficient(stage_delay);
+        let dispersion_delay = 2.0 * allpass_response(dispersion, turns).delay;
+        // The trim retunes the loop's delay and nothing else.
+        let trim = exp2(clamp(p.loop_trim_volts, -1.0, 1.0));
+        // The trip through the cables is part of the string.
+        let latency = if p.loop_return { LOOP_LATENCY } else { 0.0 };
+        let delay = period / trim - response.delay - dispersion_delay - latency;
+
+        // Tension: the swing's energy moves the delay by up to this many
+        // samples, scaled by the knob.
+        let tension = unit(p.tension) * TENSION_MAX_FRACTION * period;
+        let energy_rate = clamp(1.0 / (TENSION_PERIODS * period), 0.0, 1.0);
 
         // Passes of the loop per decay time, measured at the reference note
         // unless key tracking says to measure at this one.
@@ -424,6 +533,10 @@ impl Voice {
             drive_gain: 1.0 + (DRIVE_MAX_GAIN - 1.0) * drive_mix,
             drive_mix,
             sine_increment: increment_from_turns(harmonic * turns),
+            dispersion,
+            tension,
+            energy_rate,
+            buzz: unit(p.buzz),
         }
     }
 
@@ -434,12 +547,19 @@ impl Voice {
         self.drive_gain = t.drive_gain;
         self.drive_mix = t.drive_mix;
         self.sine_increment = t.sine_increment;
+        self.energy_rate = t.energy_rate;
         if self.primed {
+            self.dispersion.aim(t.dispersion, samples);
+            self.tension.aim(t.tension, samples);
+            self.buzz.aim(t.buzz, samples);
             self.delay.aim(t.delay, samples);
             self.gain.aim(t.gain, samples);
             self.comb_delay.aim(t.comb_delay, samples);
         } else {
             // The first block has nothing to glide from.
+            self.dispersion.jump(t.dispersion);
+            self.tension.jump(t.tension);
+            self.buzz.jump(t.buzz);
             self.delay.jump(t.delay);
             self.gain.jump(t.gain);
             self.comb_delay.jump(t.comb_delay);
@@ -532,7 +652,23 @@ impl Voice {
         consider(self.loop_filter.state());
         consider(self.tone_filter.state());
         consider(self.dc.state());
+        consider(self.energy);
+        for stage in &self.dispersion_stages {
+            consider(stage.x1);
+            consider(stage.y1);
+        }
         smallest
+    }
+}
+
+/// The buzz: positive swings squeezed against a knee, negative left alone.
+/// Slope one at zero, so a quiet string is the same string, and at no buzz
+/// the identity exactly. Passive: it never returns more than it was given.
+fn buzz(x: f32, amount: f32) -> f32 {
+    if amount <= 0.0 || x <= 0.0 {
+        x
+    } else {
+        (1.0 - amount) * x + amount * BUZZ_KNEE * tanh(x / BUZZ_KNEE)
     }
 }
 

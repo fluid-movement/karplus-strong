@@ -143,6 +143,21 @@ pub fn dc_blocker_response(coefficient: f32, turns: f32) -> Response {
     }
 }
 
+/// Response of the first-order allpass `(a + z⁻¹)/(1 + a·z⁻¹)` at `turns` per
+/// sample. Its gain is one. Its phase delay is `(1 − a)/(1 + a)` samples at
+/// DC: exactly one sample at every frequency for `a = 0`, more for negative
+/// `a`. For negative `a` the delay falls as frequency rises, which is what a
+/// stiff string does: its high partials travel faster.
+pub fn allpass_response(a: f32, turns: f32) -> Response {
+    let c = cos_turns(turns);
+    let s = sin_turns(turns);
+    let phase = atan2(-s, a + c) - atan2(-a * s, 1.0 + a * c);
+    Response {
+        gain: 1.0,
+        delay: phase_delay(phase, turns),
+    }
+}
+
 /// The coefficient `fathom_core::DcBlocker::set_corner_hz` arrives at for a
 /// corner frequency.
 ///

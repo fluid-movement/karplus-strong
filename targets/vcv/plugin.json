@@ -10,7 +10,7 @@
     {
       "slug": "KarplusStrong",
       "name": "Karplus-Strong",
-      "description": "Polyphonic plucked string: tuned Karplus-Strong loop with pick position, drive, damping and an audio exciter input.",
+      "description": "Polyphonic plucked string: tuned Karplus-Strong loop with pick position, drive, damping, an audio exciter input, stiffness, tension and buzz in the loop, an outboard-loop send and return, and a shared body and sympathetic strings.",
       "tags": ["Physical modeling", "Oscillator", "Polyphonic"]
     }
   ]

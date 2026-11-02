@@ -24,6 +24,9 @@ Fathom crates come in as git dependencies pinned to one commit
 Voice::new(sample_rate: f32, seed: u32) -> Self
 Voice::reset(&mut self)                     // silent, as new; audio-thread safe
 Voice::process(&mut self, p: &Params, gate: &[f32], audio_in: &[f32], out: &mut [f32])
+Voice::process_loop(.., loop_return: &[f32], send: Option<&mut [f32]>, out)   // K22
+Bridge::new(sample_rate: f32) -> Self
+Bridge::process(&mut self, p: &BridgeParams, input: &[f32], out: &mut [f32])  // the sum of the voices
 ```
 
 `gate` is in volts, `audio_in` at ±1 full scale. Either can be shorter than
@@ -32,6 +35,9 @@ lines inline (about 48 KB), so a polyphonic shell keeps one per channel,
 allocated once.
 
 There is no `configure()`/`Config` (decision K5).
+
+A `Bridge` is about 260 KB (eight sympathetic lines), one per module, not per
+voice (K23).
 
 ## The VCV shim
 

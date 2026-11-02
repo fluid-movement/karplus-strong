@@ -37,6 +37,11 @@ typedef enum {
 } KarplusExciter;
 
 /**
+ * An opaque bridge: the body and the sympathetic strings the voices share.
+ */
+typedef struct KarplusBridge KarplusBridge;
+
+/**
  * An opaque string voice. The C side only ever holds a pointer to it.
  */
 typedef struct KarplusVoice KarplusVoice;
@@ -118,7 +123,77 @@ typedef struct {
    * Non-zero while the panel's PLUCK button is held.
    */
   uint8_t manual_gate;
+  /**
+   * Stiffness knob: dispersion in the loop.
+   */
+  float stiffness;
+  /**
+   * Tension modulation knob.
+   */
+  float tension;
+  /**
+   * Buzz knob: a one-sided clip in the loop.
+   */
+  float buzz;
+  /**
+   * Non-zero if the loop return jack is patched.
+   */
+  uint8_t loop_return;
+  /**
+   * Tuning trim of the outboard loop, in volts.
+   */
+  float loop_trim_volts;
 } KarplusParams;
+
+/**
+ * What the bridge is told every block. Mirrors `karplus_core::BridgeParams`.
+ */
+typedef struct {
+  /**
+   * Pitch of the lead voice, in volts.
+   */
+  float root_volts;
+  /**
+   * Body shape knob.
+   */
+  float body_shape;
+  /**
+   * Body size knob.
+   */
+  float body_size;
+  /**
+   * Body material knob.
+   */
+  float body_material;
+  /**
+   * Dry against body.
+   */
+  float body_mix;
+  /**
+   * Non-zero if the body follows the played note.
+   */
+  uint8_t body_track;
+  /**
+   * Sympathetic tuning knob.
+   */
+  float scene;
+  /**
+   * Sympathetic root knob.
+   */
+  float root;
+  /**
+   * Sympathetic level knob.
+   */
+  float level;
+  /**
+   * Sympathetic ring knob.
+   */
+  float decay;
+  /**
+   * Non-zero if the sympathetic root follows the played note.
+   */
+  uint8_t follow;
+} KarplusBridgeParams;
 
 #ifdef __cplusplus
 extern "C" {
@@ -181,6 +256,82 @@ void karplus_voice_process(KarplusVoice *voice,
                            const float *audio_in,
                            float *out,
                            size_t count);
+
+/**
+ * Render `count` samples with the loop brought out (K22).
+ *
+ * As [`karplus_voice_process`], plus `loop_return`, what comes back from the
+ * outboard chain (null reads as silence), and `send`, which is filled with
+ * the signal leaving the delay line (null skips it). Both are `count` long.
+ *
+ * # Safety
+ *
+ * As [`karplus_voice_process`]; `loop_return` must be null or point to
+ * `count` readable `f32`s, and `send` null or `count` writable ones.
+ */
+void karplus_voice_process_loop(KarplusVoice *voice,
+                                const KarplusParams *params,
+                                const float *gate,
+                                const float *audio_in,
+                                const float *loop_return,
+                                float *send,
+                                float *out,
+                                size_t count);
+
+/**
+ * Fill a `KarplusBridgeParams` with the core's defaults.
+ *
+ * # Safety
+ *
+ * `out` must be null or a valid, writable `KarplusBridgeParams`.
+ */
+void karplus_bridge_params_default(KarplusBridgeParams *out);
+
+/**
+ * Create a bridge.
+ */
+KarplusBridge *karplus_bridge_new(float sample_rate);
+
+/**
+ * Destroy a bridge. Null is accepted and ignored.
+ *
+ * # Safety
+ *
+ * `bridge` must be null, or from [`karplus_bridge_new`] and not yet freed.
+ */
+void karplus_bridge_free(KarplusBridge *bridge);
+
+/**
+ * Silence a bridge. Allocation-free, but not cheap: it clears the sympathetic
+ * strings' lines.
+ *
+ * # Safety
+ *
+ * `bridge` must be null or valid.
+ */
+void karplus_bridge_reset(KarplusBridge *bridge);
+
+/**
+ * Sum `channels` voices and run them through the bridge.
+ *
+ * `voices` points to `channels` consecutive blocks of `stride` samples, of
+ * which the first `count` of each are used: the layout of a C array
+ * `float v[channels][stride]`. Null reads as silence. `out` receives `count`
+ * samples.
+ *
+ * # Safety
+ *
+ * `bridge` and `params` must be null or valid. `out` must be null or point to
+ * `count` writable `f32`s. `voices` must be null or point to
+ * `channels * stride` readable `f32`s, with `count <= stride`.
+ */
+void karplus_bridge_process(KarplusBridge *bridge,
+                            const KarplusBridgeParams *params,
+                            const float *voices,
+                            size_t channels,
+                            size_t stride,
+                            float *out,
+                            size_t count);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -1,0 +1,11 @@
+name: sympathetic_off_is_silent
+description: >
+  `sympathetic_rings` with the level at nothing: the strings hear nothing and
+  the string has gone, so there is nothing to hear.
+pitch: C4
+duration: 4s
+params: { decay: 0.0, sym_level: 0.0, sym_scene: 0.2, sym_decay: 0.8 }
+analysis: { from: 600ms, to: 3s }
+assert:
+  rms_dbfs: { max: -100 }
+  non_finite_samples: { max: 0 }

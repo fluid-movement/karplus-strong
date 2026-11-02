@@ -1,0 +1,11 @@
+name: tension_settles
+description: >
+  The chirp of `tension_chirp` is a chirp and not a detuning: once the string
+  has died down it is in tune. Measured at C4 over 1.5-3 s: +0.27 cents.
+pitch: C4
+duration: 3s
+params: { tension: 1.0, decay: 0.8, key_track: 1 }
+analysis: { from: 1.5s, to: 3s }
+assert:
+  pitch_error_cents: { min: -1.0, max: 1.0 }
+  non_finite_samples: { max: 0 }

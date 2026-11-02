@@ -1,0 +1,14 @@
+name: outboard_dark_is_flat
+description: >
+  An 800 Hz filter in the loop adds group delay of its own and the note goes
+  flat. That is the outboard filter's doing, and the TRIM knob is for it
+  (`outboard_trim_fixes_it`). Measured at C3: -42 cents.
+pitch: C3
+duration: 3s
+outboard: { lowpass_hz: 800 }
+params: { key_track: 1, decay: 0.5 }
+analysis: { from: 50ms, to: 2.5s }
+assert:
+  pitch_error_cents: { min: -60, max: -20 }
+  peak: { min: 0.05, max: 1.0 }
+  non_finite_samples: { max: 0 }

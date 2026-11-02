@@ -1,0 +1,13 @@
+name: outboard_dark_loop
+description: >
+  What patching a lowpass filter into the loop sounds like, simulated with an
+  800 Hz one-pole, tuned back by TRIM (0.92). The string should sound like
+  itself but darker and shorter, in tune.
+pitch: C3
+duration: 6s
+outboard: { lowpass_hz: 800 }
+params: { decay: 0.7, loop_trim: 0.92 }
+plucks: [0s, 2s, 4s]
+assert:
+  non_finite_samples: { max: 0 }
+  peak: { min: 0.05, max: 1.0 }

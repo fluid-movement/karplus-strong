@@ -62,6 +62,20 @@ pub struct Params {
     /// A gate held from the panel: the PLUCK button. Combined with the gate
     /// input, so either can play the string.
     pub manual_gate: bool,
+    /// Stiffness knob: a dispersion allpass in the loop, 0 an ideal string.
+    /// See [`stiffness_delay`].
+    pub stiffness: f32,
+    /// Tension modulation knob: how far a loud string runs sharp, 0 none.
+    /// See [`TENSION_MAX_FRACTION`].
+    pub tension: f32,
+    /// Buzz knob: a one-sided clip in the loop, the bridge of a sitar. 0 none.
+    pub buzz: f32,
+    /// Whether anything is patched into the loop return. If so, the return
+    /// replaces the loop's lowpass (K22).
+    pub loop_return: bool,
+    /// Tuning trim of the outboard loop, in volts of pitch, applied to the
+    /// loop's delay alone.
+    pub loop_trim_volts: f32,
 }
 
 impl Default for Params {
@@ -85,6 +99,11 @@ impl Default for Params {
             velocity_volts: 10.0,
             velocity_patched: false,
             manual_gate: false,
+            stiffness: 0.0,
+            tension: 0.0,
+            buzz: 0.0,
+            loop_return: false,
+            loop_trim_volts: 0.0,
         }
     }
 }
@@ -168,3 +187,36 @@ pub fn damp_seconds(knob: f32) -> Option<f32> {
 
 /// Gain into the drive stage, 1 to [`DRIVE_MAX_GAIN`].
 pub const DRIVE_MAX_GAIN: f32 = 8.0;
+
+/// Largest fraction of a period the tension knob shortens it by, at full
+/// amount and full string energy: 12%, about 220 cents.
+pub const TENSION_MAX_FRACTION: f32 = 0.12;
+
+/// Longest the dispersion allpass is allowed to delay the fundamental, as a
+/// fraction of the period, for both stages together.
+pub const STIFFNESS_MAX_FRACTION: f32 = 0.4;
+
+/// The most delay one dispersion stage has at DC, in samples.
+pub const STIFFNESS_MAX_DELAY: f32 = 24.0;
+
+/// DC delay of one dispersion stage, in samples, for a knob position and a
+/// period in samples. One sample at rest (an allpass with a coefficient of
+/// zero), growing with the square of the knob so that the first half of the
+/// travel is subtle; capped so the pair never delays the fundamental by more
+/// than [`STIFFNESS_MAX_FRACTION`] of the period.
+pub fn stiffness_delay(knob: f32, period: f32) -> f32 {
+    let k = unit(knob);
+    let cap = 0.5 * STIFFNESS_MAX_FRACTION * period;
+    let top = if cap < STIFFNESS_MAX_DELAY {
+        cap
+    } else {
+        STIFFNESS_MAX_DELAY
+    };
+    let top = if top < 1.0 { 1.0 } else { top };
+    1.0 + k * k * (top - 1.0)
+}
+
+/// The allpass coefficient whose DC delay is `delay` samples.
+pub fn allpass_coefficient(delay: f32) -> f32 {
+    (1.0 - delay) / (1.0 + delay)
+}

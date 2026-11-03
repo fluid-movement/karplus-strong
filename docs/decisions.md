@@ -292,23 +292,30 @@ pluck uses a small part of it. If the chirp is too shy, raise
 swing would be frequency modulation of the loop, a different (buzzy) effect.
 Averaging over three periods makes it a slow, musical pitch glide.
 
-### K21 — Buzz: a one-sided clip with a fixed knee *(new)*
+### K21 — Buzz: a curved bridge that bends the string, lossless *(new; reworked in K27)*
 
-A sitar's bridge is curved and the string touches it on one side. The loop
-squeezes positive swings against a knee of 0.12, with slope one at zero and
-never more than the input (it is passive), crossfaded by the knob: at zero it
-is the identity exactly. It sits before the DC blocker, so the blocker takes
-away the DC the squeeze makes, and the measured output DC is below −80 dBFS.
+A sitar's bridge is curved, and the string touches it where it swings hard.
+The touch shortens the string for a moment. The loop reads its delay line at
+`delay × (1 − touch × bend)`, where `touch` is twice the swing beyond a dead
+zone of 0.025, with the negative side counting 1.5 times the positive. The
+knob is squared and reaches a bend of 1% of the length at full. A quiet string
+never leaves the dead zone and is untouched, so a hard pluck buzzes and the
+tail comes clean, as on a sitar.
 
-**What was tried first, and why it was thrown away:** a knee that follows the
-string's level (so the buzz is the same at every amplitude), and a delay
-modulation by the waveform itself. Both took a third to a half of the note's
-sustain with them or left it detuned by 7 cents; the first also made DC that
-climbed and collapsed the string. The fixed knee does the other thing a sitar
-does: it buzzes while the note is loud and the tail comes clean. Measured at
-buzz 1: tuning within 0.1 cents, T60 down 5–30% depending on the note (the
-squeeze costs some energy; K12's gain correction is *not* applied for it,
-because it would be a guess about the waveform).
+**It takes nothing away.** A time warp adds partials and removes none: at full
+buzz the note keeps its pitch (±0.2 cents) and its decay (T60 within 1%) at
+C2, C3 and C4. The warp is lopsided, so it leaves a little DC, mostly on low
+notes; the loop's DC blocker is brought up with the knob (the corner goes from
+a 512th of the note to a 96th), and the make-up gain cap follows it. Measured
+DC at full buzz: −73 dBFS at C4, below −100 at C2.
+
+**The first version was a clip, and it was thrown away.** I first squeezed the
+positive swings against a knee. That took 5–30% of the sustain with it, and
+the variants that fixed that (a knee that follows the level; a delay
+modulation normalised to the level) either left DC that climbed and collapsed
+the string or detuned it by 7 cents. The lossless version is Mutable
+Instruments' (K27); the dead zone, the 1.5 asymmetry and the 1% are theirs in
+spirit and measured again here, not copied.
 
 ### K22 — The outboard loop: SEND and RETURN, normalled to the internal damping *(new)*
 
@@ -471,3 +478,140 @@ having none.
 | `BODY_GAIN`, `MODE_FALLOFF` | 0.5, 0.85 | louder body; brighter body (toward 1) |
 | `SYMPATHETIC_SENSITIVITY` | 6 | wake the strings more easily |
 | `SETTLE_S` | 30 ms | slower, smoother knob response |
+
+---
+
+## What Elements and Rings taught the bridge (K27–K31)
+
+Andre's instruction: Mutable Instruments' Elements and Rings are excellent
+modelling modules and open source (MIT, Émilie Gillet); learn from them, do
+not copy. I read the DSP of both (`elements/dsp/resonator.cc`, `string.cc`,
+`part.cc`; `rings/dsp/resonator.cc`, `string.cc`, `part.cc`). What follows is
+what they do that this module did not, what was taken, in this instrument's
+own numbers and code, and what was left alone and why. Nothing is a line
+for line port; the mode series, the laws and every constant were rederived
+or remeasured here, and the tests are ours.
+
+### K27 — The curved bridge, lossless *(taken)*
+
+Their `String` reads its delay line at a length bent by a dead-zone, lopsided
+rectification of the signal, and mixes in an AC-blocked copy to keep DC out.
+This is the thing my clip (K21's first version) was trying to be, without its
+cost. See K21 for what it measured here. **Not taken:** their *dispersion
+noise* (random modulation of the length that grows with the knob), which makes
+a stiff string metallic and noisy; and tying buzz and stiffness to one bipolar
+knob (negative one way is sitar, positive the other is piano). The panel has
+separate knobs, and two knobs are easier to understand than one that does two
+things.
+
+### K28 — Modes as state-variable band-passes, twenty-four of them *(taken)*
+
+Their resonators are a bank of state-variable band-pass filters, up to 64,
+with the coefficients refreshed at control rate. The body was twelve two-pole
+direct-form filters. Direct-form resonators glitch when their coefficients
+move while they ring (I smoothed the knobs over 30 ms to hide it); the
+state-variable (topology-preserving) form does not. So the modes are now that
+form, 24 of them, the knobs settle in 12 ms (it feels like a knob now, not a
+slow fade), and the coefficients are recomputed every block. Twenty-four
+rather than their 64 because the body is one shared bank at Rack's sample
+rate, not one per voice on a 168 MHz microcontroller, and twenty-four is where
+the series stops mattering to the ear at the levels the strings drive it; the
+count is `BODY_MODES`, and `just verify` has a test that the twentieth mode
+rings in tune. Modes above 0.45 of the sample rate are skipped, not folded.
+The mode tables were extended to 24 entries by solving the same equations
+(bar, drum) and enumerating the same rectangle (plate).
+
+**Damping.** Theirs is one recurrence over the mode index, which saturates
+so the highest partials do not die at once. Ours stays a power law over the
+mode's *frequency ratio* (T60 ∝ ratio^−α), which is right for inharmonic
+shapes where index and frequency are not the same thing; but I took the
+saturation: a high mode now rings at least 8% as long as the first
+(`MODE_T60_FLOOR`), so a damped body is dull and not just short.
+
+**Not taken:** their Q ∝ frequency baseline with a loss per mode, their
+separate DAMPING and BRIGHTNESS knobs (our MATERIAL is one knob doing both, which
+was a decision of K24 and costs one knob of panel), and their geometry axis,
+which is one continuous generative law (a stretched or compressed harmonic
+series) where ours morphs between four physically derived series. Theirs is
+smoother as a knob; ours has recognisable places to stop (bar, drum, plate).
+If the SHAPE morph feels stepped by ear, theirs is the thing to try next.
+
+### K29 — Pickup position as a weight on each mode *(taken)*
+
+The most useful idea in either module and the one this one lacked. A pickup at
+a point along the string hears mode *n* at `cos(π·n·position)`. They apply
+that as a weight on each mode, not as a comb filter on the signal, because a
+comb that moves flanges and smears the attack. **POSITION** does the same: at
+0 every mode is heard, at 1 the odd ones are gone and the sound is hollow.
+It is a real timbre control that costs nothing (twenty-four weights a block,
+ramped per sample, because the position is extremely sensitive to zipper
+noise, as they note). A test checks the odd modes fall below 5% and the even
+ones do not move.
+
+### K30 — Stereo from a second pickup that drifts *(taken)*
+
+Both modules take a second pickup, put it a little off the first, and move it
+slowly with a low-frequency oscillator; the difference between the two is a
+side signal, scaled by a width control and added to the left and subtracted from
+the right. It gives the image life without any chorus or reverb. Here: the
+**BRIDGE** output is now **L** and **R**; **SPREAD** is the width, at 0 the two
+are identical to the bit (a test), and the mean of the two is the mono signal
+whatever the spread. The second body pickup sits 0.08 away and drifts ±0.1 at
+0.55 Hz; each sympathetic string has its own second pickup, a tap on its own
+line wandering at its own slow rate. **Not taken:** Rings' split of the modes
+into odd and even outputs (what you get for free from a pickup at the middle),
+and their per-module randomised drift and offset (a seed derived from the
+hardware: a property of a unit, not of a design; ours are fixed constants).
+
+### K31 — Sympathetic strings: partners, glide, and a longer reach *(taken, partly)*
+
+Rings' sympathetic strings differ from the first version here in three ways
+that matter to the sound:
+
+- **Detuned partners.** Half the strings are doubled a cent or two off, so the
+  bank beats slowly instead of sounding like copies. Four of the eight are
+  doubled (strings 2, 3, 4 and 6) at +1.2, −0.9, +1.6 and −1.4 cents: twelve
+  lines in all (`SYMPATHETIC_LINES`), the eight the scenes tune and four partners.
+  A tuned string with a partner measures as the pair, and the tuning test allows
+  for it.
+- **A slow retune.** When a new note moves the followed root, they glide the
+  strings' pitch, as if retuning. The root now settles in 150 ms, up from 60.
+- **Higher strings ring longer.** Each string's ring time is longer by 10% of
+  RING per step up the table, so a struck bank blooms into its upper strings.
+
+**Not taken:** their chord table (eleven equal-tempered chords, selected by a
+separate knob; ours are six just-intoned scenes and a morph, K25), and the
+fixed tonic string that always sounds beside the played notes. That one is a
+good idea (the drone of a sitar's chikari or a tanpura's Sa, independent of the
+FOLLOW switch) and is in `TODO.md`, not built. Also **not taken** and noted:
+their strings are one-way, driven only by string 0; ours are driven by the sum
+of all the voices. That is the module's polyphony, not a difference of
+principle, and the coupling stays one-way (K25).
+
+### K32 — External audio into the body, and what that leaves for later *(new)*
+
+Elements is a resonator first: you send it sound. The **BODY IN** jack sends
+audio straight into the shared bridge (the body and the sympathetic strings),
+through the same input sum as the strings. A drum loop, a noise source or a
+sampled pluck through the modal body is Elements' signature use, and it costs
+one jack. **Left for later, noted in `TODO.md`:** Elements' bowed modes (banded
+waveguides with a friction table), its breath-driven tube exciter, its reverb
+(SPACE), and Rings' fixed tonic string.
+
+### K33 — A summary of the constants and knobs this round changed
+
+| What | Before | Now |
+| --- | --- | --- |
+| Body modes | 12, direct-form | 24, state-variable |
+| Body knobs | SHAPE SIZE MATERIAL MIX TRACK | + POSITION, SPREAD |
+| Bridge output | one mono jack | L and R |
+| Settling of body knobs | 30 ms | 12 ms |
+| Root glide | 60 ms | 150 ms |
+| Sympathetic lines | 8 | 12 (8 + 4 partners) |
+| High-mode ring floor | none | 8% of the first |
+| Buzz | positive clip (lossy) | curved bridge (lossless) |
+| New jack | | BODY IN |
+
+The panel's right half moved to fit: POSITION and SPREAD sit beside the TRACK
+switch, the SHAPE and SCENE CV jacks beside their sections, and the bottom
+row is SEND, RETURN, BODY IN and the BRIDGE L and R pair.

@@ -30,6 +30,11 @@
 - [ ] A two-way bridge: the body and sympathetic strings feeding back into the
       voices' loops (K23). Needs the same per-sample step.
 - [ ] CV and attenuverters for the new knobs, if the panel can take it.
+- [ ] **A fixed tonic string** beside the followed ones (the sitar's chikari, the tanpura's Sa): from Rings (K31).
+- [ ] A bowed body: Elements' banded waveguides with a friction table, driven from BODY IN or a bow input (K32).
+- [ ] A reverb stage, Elements' SPACE; a breath exciter.
+- [ ] Try Elements' continuous geometry law for SHAPE if the four-anchor morph feels stepped (K28).
+- [ ] Odd/even mode outputs as an alternative stereo split (K30).
 - [ ] The body follows the lead voice only (K24); a chord leaves it on the first note.
 - [ ] Check the plate and guitar-body mode tables against a source (K24).
 

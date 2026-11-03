@@ -1,0 +1,16 @@
+name: body_pickup_stereo
+description: >
+  POSITION sweeping from every mode to hollow (the odd modes leaving), with a
+  glass body and SPREAD up, plucked every 1.5 s. Listen on the BRIDGE pair
+  (the render is the left channel): the timbre should hollow out smoothly with
+  no flanging. Then turn SPREAD up in Rack and listen for the drifting second
+  pickup moving between the ears.
+pitch: C3
+duration: 12s
+params: { decay: 0.3, body_mix: 0.85, body_material: 0.8, body_size: 0.45, body_spread: 1.0, body_shape: 0.35 }
+automation:
+  body_position: { from: 0, to: 1, over: 12s }
+plucks: [0s, 1.5s, 3s, 4.5s, 6s, 7.5s, 9s, 10.5s]
+assert:
+  non_finite_samples: { max: 0 }
+  peak: { min: 0.05, max: 1.0 }

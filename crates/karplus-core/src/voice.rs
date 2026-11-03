@@ -28,7 +28,7 @@
 
 use crate::delay::{DelayLine, MIN_DELAY};
 use crate::filter::{allpass_response, dc_blocker_response, fathom_dc_coefficient, LoopFilter};
-use crate::math::{flush_denormal, soft_knee, tanh, unit, Rng};
+use crate::math::{flush_denormal, soft_knee, sqrt, tanh, unit, Rng};
 use crate::params::{
     allpass_coefficient, brightness_ratio, burst_periods, damp_seconds, decay_seconds,
     pick_fraction, stiffness_delay, tone_ratio, ExciterKind, Params, DRIVE_MAX_GAIN, MAX_CUTOFF,
@@ -60,18 +60,19 @@ pub const MAX_LOOP_GAIN: f32 = 0.999_99;
 /// blocker is only a guard and can sit eight times lower: half a cent.
 const DC_CORNER_DIVISOR: f32 = 512.0;
 
-/// The loop gain of the blocker's subsonic mode, as a fraction of the loop
-/// gain.
-///
-/// A DC blocker inside a loop leads in phase at low frequencies, and that
-/// lead closes the loop's phase at one frequency below the fundamental, so
-/// there is a mode there: about `f/57` at a divisor of 512. Its gain is
-/// `1/√(1 + 2π/divisor)`, whatever the note. Left alone, a dark setting —
-/// where the lowpass takes more from the fundamental than the blocker takes
-/// from this mode — would hand the make-up gain to the subsonic mode, and it
-/// rang on as a slow wobble for seconds after the note had gone. The gain
-/// is capped so that this mode always dies at least as fast as the note.
-const SUB_MODE_GAIN: f32 = 0.993_92;
+/// How much lower the divisor goes at full buzz. The curved bridge's bend is
+/// lopsided and leaves a little DC, loudest on low notes; the blocker is
+/// brought up to remove it (to a divisor of 96), and the subsonic-mode cap
+/// below follows it. Elements AC-couples its bridge the same way.
+const DC_CORNER_BUZZ_REACH: f32 = 416.0;
+
+// The loop gain of the blocker's subsonic mode is `1/√(1 + 2π/divisor)`,
+// whatever the note (0.99392 at a divisor of 512): see the comment on the
+// divisor above. The make-up gain for the filters is capped at its inverse,
+// so that this mode always dies at least as fast as the note. Left alone, a
+// dark setting, where the lowpass takes more from the fundamental than the
+// blocker takes from this mode, would hand the make-up gain to the subsonic
+// mode, and it rang on as a slow wobble for seconds after the note had gone.
 
 /// `log2(1000)`: sixty decibels, as a power of two.
 const LOG2_1000: f32 = 9.965_784;
@@ -132,12 +133,23 @@ const MIN_PERIOD: f32 = 4.0;
 /// to collect.
 pub const LOOP_LATENCY: f32 = 34.0;
 
-/// The knee of the buzz: a positive swing above about this is squeezed. Fixed,
-/// not relative to the string's level: a hard-plucked note buzzes, and the
-/// buzz fades away as it dies, as on a sitar. (A knee that follows the level
-/// buzzes every amplitude alike, and was tried first: it also took a third
-/// of the note's sustain with it, and left DC. K21 has the numbers.)
-const BUZZ_KNEE: f32 = 0.12;
+/// The buzz is a curved bridge: the string touches it where it swings hard,
+/// and the touch shortens the string for a moment. Not a clip, so it takes no
+/// energy: the note keeps its pitch and its decay and gains partials. The idea
+/// is Mutable Instruments' (Elements and Rings, `String`); the numbers here are
+/// measured on this loop (K21).
+///
+/// A swing smaller than this does not touch the bridge, so a hard-plucked note
+/// buzzes and the quiet tail comes clean.
+const BUZZ_DEAD_ZONE: f32 = 0.025;
+
+/// Touching on the negative side bends the string this much more than on the
+/// positive. The asymmetry is what makes the buzz a buzz and not vibrato.
+const BUZZ_ASYMMETRY: f32 = 1.5;
+
+/// The most the string's length is bent, as a fraction, per unit of touch, at
+/// full buzz. The knob is squared, so the first half of its travel is gentle.
+const BUZZ_BEND: f32 = 0.01;
 
 /// How long the string's energy is averaged for tension modulation, in
 /// periods. Short enough to follow a pluck, long enough not to follow the
@@ -167,7 +179,6 @@ impl Allpass {
 /// Everything derived from [`Params`] for one block.
 #[derive(Debug, Clone, Copy)]
 struct Targets {
-    frequency: f32,
     delay: f32,
     gain: f32,
     comb_delay: f32,
@@ -180,6 +191,7 @@ struct Targets {
     tension: f32,
     energy_rate: f32,
     buzz: f32,
+    dc_corner: f32,
 }
 
 /// One Karplus-Strong string.
@@ -196,6 +208,7 @@ pub struct Voice {
     dispersion: Ramp,
     tension: Ramp,
     buzz: Ramp,
+    touch: f32,
     energy: f32,
     energy_rate: f32,
     delay: Ramp,
@@ -242,6 +255,7 @@ impl Voice {
             dispersion: Ramp::default(),
             tension: Ramp::default(),
             buzz: Ramp::default(),
+            touch: 0.0,
             energy: 0.0,
             energy_rate: 0.01,
             delay: Ramp::default(),
@@ -281,6 +295,7 @@ impl Voice {
         self.dispersion = Ramp::default();
         self.tension = Ramp::default();
         self.buzz = Ramp::default();
+        self.touch = 0.0;
         self.energy = 0.0;
         self.energy_rate = 0.01;
         self.delay = Ramp::default();
@@ -377,7 +392,14 @@ impl Voice {
             // Tension: a string stretched by its own swing runs sharp, and
             // comes back down as the swing dies.
             let stretch = self.tension.next() * self.energy_unit();
-            let delayed = self.string.read(self.delay.next() - stretch);
+            let bend = 1.0 - self.touch * self.buzz.next();
+            let delayed = self.string.read((self.delay.next() - stretch) * bend);
+            // How hard the string is touching the bridge now, for the next
+            // sample's length: twice the swing beyond the dead zone, negative
+            // on the other side.
+            let over = delayed.abs() - BUZZ_DEAD_ZONE;
+            let side = if delayed > 0.0 { 1.0 } else { -BUZZ_ASYMMETRY };
+            self.touch = (over.abs() + over) * side;
             if let Some(slot) = send.as_deref_mut().and_then(|s| s.get_mut(i)) {
                 *slot = delayed;
             }
@@ -389,8 +411,7 @@ impl Voice {
             } else {
                 internal
             };
-            let buzzed = buzz(damped, self.buzz.next());
-            let filtered = self.dc.process(buzzed);
+            let filtered = self.dc.process(damped);
             let dispersed = self.disperse(filtered);
             let x = self.gain.next() * dispersed + self.drive_gain * picked;
             let written = flush_denormal(shape(x, self.drive_mix));
@@ -448,10 +469,9 @@ impl Voice {
         // What the loop's filters do to the fundamental. With an outboard
         // loop the lowpass is not in the circuit; whatever the outboard
         // filter does to level and phase is its owner's to correct (the trim).
-        let blocker = dc_blocker_response(
-            fathom_dc_coefficient(frequency / DC_CORNER_DIVISOR, rate),
-            turns,
-        );
+        let divisor = DC_CORNER_DIVISOR - DC_CORNER_BUZZ_REACH * unit(p.buzz);
+        let dc_corner = frequency / divisor;
+        let blocker = dc_blocker_response(fathom_dc_coefficient(dc_corner, rate), turns);
         let response = if p.loop_return {
             blocker
         } else {
@@ -492,10 +512,11 @@ impl Voice {
         }
         // Make up what the filters take from the fundamental, but never so
         // much that the DC blocker's own mode outlives the note.
-        let loss = if response.gain > SUB_MODE_GAIN {
+        let sub_mode = 1.0 / sqrt(1.0 + core::f32::consts::TAU / divisor);
+        let loss = if response.gain > sub_mode {
             response.gain
         } else {
-            SUB_MODE_GAIN
+            sub_mode
         };
         let gain = clamp(wanted / loss, 0.0, MAX_LOOP_GAIN);
 
@@ -524,7 +545,6 @@ impl Voice {
         };
 
         Targets {
-            frequency,
             delay,
             gain,
             comb_delay,
@@ -536,14 +556,15 @@ impl Voice {
             dispersion,
             tension,
             energy_rate,
-            buzz: unit(p.buzz),
+            buzz: unit(p.buzz) * unit(p.buzz) * BUZZ_BEND,
+            dc_corner,
         }
     }
 
     fn apply(&mut self, t: &Targets, samples: usize) {
         self.loop_filter.set_coefficient(t.loop_coefficient);
         self.tone_filter.set_coefficient(t.tone_coefficient);
-        self.dc.set_corner_hz(t.frequency / DC_CORNER_DIVISOR);
+        self.dc.set_corner_hz(t.dc_corner);
         self.drive_gain = t.drive_gain;
         self.drive_mix = t.drive_mix;
         self.sine_increment = t.sine_increment;
@@ -658,17 +679,6 @@ impl Voice {
             consider(stage.y1);
         }
         smallest
-    }
-}
-
-/// The buzz: positive swings squeezed against a knee, negative left alone.
-/// Slope one at zero, so a quiet string is the same string, and at no buzz
-/// the identity exactly. Passive: it never returns more than it was given.
-fn buzz(x: f32, amount: f32) -> f32 {
-    if amount <= 0.0 || x <= 0.0 {
-        x
-    } else {
-        (1.0 - amount) * x + amount * BUZZ_KNEE * tanh(x / BUZZ_KNEE)
     }
 }
 

@@ -65,6 +65,8 @@ struct KarplusStrong : Module {
         BODY_SIZE_PARAM,
         BODY_MATERIAL_PARAM,
         BODY_MIX_PARAM,
+        BODY_POSITION_PARAM,
+        BODY_SPREAD_PARAM,
         BODY_TRACK_PARAM,
         SCENE_PARAM,
         ROOT_PARAM,
@@ -85,9 +87,10 @@ struct KarplusStrong : Module {
         RETURN_INPUT,
         SHAPE_INPUT,
         SCENE_INPUT,
+        BODY_INPUT,
         INPUTS_LEN
     };
-    enum OutputId { AUDIO_OUTPUT, SEND_OUTPUT, BRIDGE_OUTPUT, OUTPUTS_LEN };
+    enum OutputId { AUDIO_OUTPUT, SEND_OUTPUT, BRIDGE_LEFT_OUTPUT, BRIDGE_RIGHT_OUTPUT, OUTPUTS_LEN };
     enum LightId { LIGHTS_LEN };
 
     KarplusVoice* voices[karplus::MAX_CHANNELS] = {};
@@ -102,7 +105,9 @@ struct KarplusStrong : Module {
     float returned[karplus::MAX_CHANNELS][BLOCK] = {};
     float returning[karplus::MAX_CHANNELS][BLOCK] = {};
     KarplusBridge* bridge = NULL;
-    float bridgeOut[BLOCK] = {};
+    float bridgeLeft[BLOCK] = {};
+    float bridgeRight[BLOCK] = {};
+    float bodyIn[BLOCK] = {};
 
     KarplusStrong() {
         config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
@@ -162,6 +167,9 @@ struct KarplusStrong : Module {
         configParam(BODY_MATERIAL_PARAM, 0.f, 1.f, b.body_material,
                     "Body material (wood to glass)");
         configParam(BODY_MIX_PARAM, 0.f, 1.f, b.body_mix, "Body mix");
+        configParam(BODY_POSITION_PARAM, 0.f, 1.f, b.body_position,
+                    "Body pickup position (all modes to hollow)");
+        configParam(BODY_SPREAD_PARAM, 0.f, 1.f, b.body_spread, "Stereo spread");
         configSwitch(BODY_TRACK_PARAM, 0.f, 1.f, 0.f, "Body", {"Fixed in Hz", "Follows the note"});
         configParam(SCENE_PARAM, 0.f, 1.f, b.scene,
                     "Sympathetic tuning (octaves, major, minor, raga, tanpura, cluster)");
@@ -173,7 +181,9 @@ struct KarplusStrong : Module {
         configInput(SHAPE_INPUT, "Body shape CV");
         configInput(SCENE_INPUT, "Sympathetic tuning CV");
         configOutput(SEND_OUTPUT, "Loop send");
-        configOutput(BRIDGE_OUTPUT, "Bridge (body and sympathetic strings)");
+        configInput(BODY_INPUT, "Body input (audio into the body and sympathetic strings)");
+        configOutput(BRIDGE_LEFT_OUTPUT, "Bridge left (body and sympathetic strings)");
+        configOutput(BRIDGE_RIGHT_OUTPUT, "Bridge right");
 
         buildVoices(APP->engine->getSampleRate());
     }
@@ -265,6 +275,8 @@ struct KarplusStrong : Module {
         b.body_size = params[BODY_SIZE_PARAM].getValue();
         b.body_material = params[BODY_MATERIAL_PARAM].getValue();
         b.body_mix = params[BODY_MIX_PARAM].getValue();
+        b.body_position = params[BODY_POSITION_PARAM].getValue();
+        b.body_spread = params[BODY_SPREAD_PARAM].getValue();
         b.body_track = params[BODY_TRACK_PARAM].getValue() > 0.5f ? 1 : 0;
         b.scene = karplus::unipolar(params[SCENE_PARAM].getValue(), 1.f,
                                     inputs[SCENE_INPUT].getVoltage(0));
@@ -306,8 +318,9 @@ struct KarplusStrong : Module {
         }
 
         KarplusBridgeParams b = readBridgeControls();
-        karplus_bridge_process(bridge, &b, &out[0][0], (size_t)channels, (size_t)BLOCK, bridgeOut,
-                               (size_t)BLOCK);
+        karplus_bridge_process(bridge, &b, &out[0][0], (size_t)channels, (size_t)BLOCK,
+                               inputs[BODY_INPUT].isConnected() ? bodyIn : NULL, bridgeLeft,
+                               bridgeRight, (size_t)BLOCK);
     }
 
     void process(const ProcessArgs& args) override {
@@ -322,7 +335,9 @@ struct KarplusStrong : Module {
         }
         outputs[AUDIO_OUTPUT].setChannels(channels);
         outputs[SEND_OUTPUT].setChannels(channels);
-        outputs[BRIDGE_OUTPUT].setVoltage(karplus::audio_to_volts(bridgeOut[cursor]));
+        bodyIn[cursor] = karplus::audio_from_volts(inputs[BODY_INPUT].getVoltage());
+        outputs[BRIDGE_LEFT_OUTPUT].setVoltage(karplus::audio_to_volts(bridgeLeft[cursor]));
+        outputs[BRIDGE_RIGHT_OUTPUT].setVoltage(karplus::audio_to_volts(bridgeRight[cursor]));
 
         if (++cursor >= BLOCK) {
             cursor = 0;
@@ -426,6 +441,12 @@ struct KarplusStrongWidget : ModuleWidget {
         }
         addParam(createParamCentered<CKSS>(mm2px(Vec(rcol[0], 63.5f)), module,
                                            KarplusStrong::BODY_TRACK_PARAM));
+        addParam(createParamCentered<Trimpot>(mm2px(Vec(rcol[1], 63.5f)), module,
+                                              KarplusStrong::BODY_POSITION_PARAM));
+        addParam(createParamCentered<Trimpot>(mm2px(Vec(rcol[2], 63.5f)), module,
+                                              KarplusStrong::BODY_SPREAD_PARAM));
+        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(rcol[3], 63.5f)), module,
+                                                 KarplusStrong::SHAPE_INPUT));
 
         // STRINGS_Y: the sympathetic strings, then their switch.
         const int strings[4] = {KarplusStrong::SCENE_PARAM, KarplusStrong::ROOT_PARAM,
@@ -436,6 +457,8 @@ struct KarplusStrongWidget : ModuleWidget {
         }
         addParam(createParamCentered<CKSS>(mm2px(Vec(rcol[0], 99.5f)), module,
                                            KarplusStrong::FOLLOW_PARAM));
+        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(rcol[3], 99.5f)), module,
+                                                 KarplusStrong::SCENE_INPUT));
 
         // JACK_Y, right half.
         addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(bx + 9.5f, 116.5f)), module,
@@ -443,11 +466,11 @@ struct KarplusStrongWidget : ModuleWidget {
         addInput(createInputCentered<PJ301MPort>(mm2px(Vec(bx + 24.0f, 116.5f)), module,
                                                  KarplusStrong::RETURN_INPUT));
         addInput(createInputCentered<PJ301MPort>(mm2px(Vec(bx + 38.5f, 116.5f)), module,
-                                                 KarplusStrong::SHAPE_INPUT));
-        addInput(createInputCentered<PJ301MPort>(mm2px(Vec(bx + 53.0f, 116.5f)), module,
-                                                 KarplusStrong::SCENE_INPUT));
+                                                 KarplusStrong::BODY_INPUT));
+        addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(bx + 56.0f, 116.5f)), module,
+                                                   KarplusStrong::BRIDGE_LEFT_OUTPUT));
         addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(bx + 70.28f, 116.5f)), module,
-                                                   KarplusStrong::BRIDGE_OUTPUT));
+                                                   KarplusStrong::BRIDGE_RIGHT_OUTPUT));
     }
 };
 

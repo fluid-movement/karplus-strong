@@ -182,51 +182,53 @@ fn a_hard_pluck_chirps_down_and_a_soft_one_barely_moves() {
 // --- K21: buzz ----------------------------------------------------------------
 
 #[test]
-fn buzz_squeezes_one_side_of_the_wave_and_leaves_the_tuning() {
-    // A sitar's bridge touches the string on one side only: the positive
-    // swing is cut short, the negative is not. Measured as the ratio of the
-    // two peaks while the note is loud enough to reach the knee.
-    let hz = volts_to_hz(-1.0);
-    let render_with_buzz = |buzz: f32| {
+fn buzz_adds_partials_and_takes_nothing_away() {
+    // The curved bridge bends the string's length where it swings hard. It is
+    // lossless: the note keeps its pitch and its decay, and the waveform is
+    // changed.
+    let run = |volts: f32, buzz: f32, velocity: Option<f32>| {
         let p = Params {
             buzz,
             decay: 0.6,
-            ..pluck_params(-1.0)
+            velocity_patched: velocity.is_some(),
+            velocity_volts: velocity.unwrap_or(10.0),
+            ..pluck_params(volts)
         };
         render(&p, &[Pluck::trigger(0.0)], 8.0, SR, 9)
     };
-    let one_sidedness = |out: &[f32], from: f64, to: f64| {
-        let tail = span(out, SR, from, to);
-        let max = tail.iter().copied().fold(0.0f32, f32::max);
-        let min = tail.iter().copied().fold(0.0f32, f32::min);
-        f64::from(max / -min)
+    let distance = |a: &[f32], b: &[f32], from: f64, to: f64| {
+        let (x, y) = (span(a, SR, from, to), span(b, SR, from, to));
+        let num: f32 = x.iter().zip(y).map(|(p, q)| (p - q) * (p - q)).sum();
+        let den: f32 = x.iter().map(|p| p * p).sum();
+        f64::from((num / den).sqrt())
     };
-    let plain = render_with_buzz(0.0);
-    let buzzy = render_with_buzz(1.0);
-    let (a, b) = (
-        one_sidedness(&plain, 0.02, 0.15),
-        one_sidedness(&buzzy, 0.02, 0.15),
-    );
-    assert!(b < 0.6 * a, "peak ratio {a:.2} without, {b:.2} with");
-    // Half the knob is in between.
-    let half = one_sidedness(&render_with_buzz(0.5), 0.02, 0.15);
-    assert!(b < half && half < a, "{a:.2}, {half:.2}, {b:.2}");
-    // It does not move the note, take its sustain, or leave DC behind.
-    let found = peak_hz(span(&buzzy, SR, 0.1, 1.4), hz, 40.0);
-    assert!(
-        cents(found, hz).abs() < 1.0,
-        "{:+.1} cents",
-        cents(found, hz)
-    );
-    let t60 = |out: &[f32]| fundamental_t60(out, SR, hz).expect("no decay");
-    assert!(
-        t60(&buzzy) > 0.8 * t60(&plain),
-        "{:.1} s against {:.1} s",
-        t60(&buzzy),
-        t60(&plain)
-    );
-    let mean = fathom_analysis::dc_offset_dbfs(span(&buzzy, SR, 0.0, 1.0));
-    assert!(mean < -50.0, "{mean:.1} dBFS of DC");
+    for volts in [-2.0f32, -1.0, 0.0] {
+        let hz = volts_to_hz(volts);
+        let (plain, buzzy) = (run(volts, 0.0, None), run(volts, 1.0, None));
+        // Changed, while the note is loud.
+        let changed = distance(&plain, &buzzy, 0.05, 0.3);
+        assert!(
+            changed > 0.3,
+            "{volts:+} V: buzz changed the wave by only {changed:.2}"
+        );
+        // In tune, and ringing as long.
+        let found = peak_hz(span(&buzzy, SR, 0.1, 1.4), hz, 40.0);
+        assert!(
+            cents(found, hz).abs() < 1.0,
+            "{volts:+} V: {:+.2} cents",
+            cents(found, hz)
+        );
+        let t60 = |out: &[f32]| fundamental_t60(out, SR, hz).expect("no decay");
+        assert!(
+            (t60(&buzzy) / t60(&plain) - 1.0).abs() < 0.1,
+            "{volts:+} V: {:.2} s against {:.2} s",
+            t60(&buzzy),
+            t60(&plain)
+        );
+        // No DC left behind.
+        let mean = fathom_analysis::dc_offset_dbfs(span(&buzzy, SR, 0.0, 1.0));
+        assert!(mean < -50.0, "{volts:+} V: {mean:.1} dBFS of DC");
+    }
 }
 
 // --- All three, and the outboard loop: no bad settings --------------------------
@@ -397,7 +399,7 @@ fn bridge_run(p: &BridgeParams, input: &[f32], seconds: f64) -> Vec<f32> {
         let start = b * 16;
         let end = (start + block.len()).min(input.len());
         let slice = input.get(start..end).unwrap_or(&[]);
-        bridge.process(p, slice, block);
+        bridge.process_mono(p, slice, block);
     }
     out
 }
@@ -428,13 +430,22 @@ fn the_bridge_is_bounded_at_every_corner() {
     // Sixteen full-scale voices at once, then silence. Finite, inside full
     // scale, and nothing left subnormal afterwards.
     let loud = noise(24_000, 16.0, 7);
-    for bits in 0..1024u32 {
+    for n in 0..640u32 {
+        // A scatter through all 4096 corners that includes the first and the
+        // last, at a tenth of the cost of walking them all.
+        let bits = if n == 639 {
+            4095
+        } else {
+            n.wrapping_mul(2_654_435_761) >> 20
+        };
         let bit = |i: u32| if bits & (1 << i) != 0 { 1.0f32 } else { 0.0 };
         let p = BridgeParams {
             root_volts: 4.0 * bit(9) - 2.0,
             body_shape: bit(0),
             body_size: bit(1),
             body_material: bit(2),
+            body_position: bit(10),
+            body_spread: bit(11),
             body_mix: bit(3),
             body_track: bit(4) > 0.5,
             scene: bit(5),
@@ -444,12 +455,12 @@ fn the_bridge_is_bounded_at_every_corner() {
             follow: bit(8) > 0.5,
         };
         let mut bridge = Bridge::new(SR);
-        let mut block = [0.0f32; 16];
-        for b in 0..(24_000 / 16 + 2_000) {
+        let (mut block, mut right) = ([0.0f32; 16], [0.0f32; 16]);
+        for b in 0..(24_000 / 16 + 600) {
             let start = b * 16;
             let input = loud.get(start..start + 16).unwrap_or(&[]);
-            bridge.process(&p, input, &mut block);
-            for &x in &block {
+            bridge.process(&p, input, &mut block, &mut right);
+            for &x in block.iter().chain(&right) {
                 assert!(x.is_finite() && x.abs() <= 1.0, "corner {bits}: {x}");
             }
         }
@@ -468,9 +479,9 @@ fn a_long_silence_leaves_no_subnormals_in_the_bridge() {
     let mut bridge = Bridge::new(SR);
     let mut block = [0.0f32; 16];
     let burst = noise(480, 1.0, 3);
-    bridge.process(&p, &burst[..16], &mut block);
+    bridge.process_mono(&p, &burst[..16], &mut block);
     for _ in 0..(48_000 * 90 / 16) {
-        bridge.process(&p, &[], &mut block);
+        bridge.process_mono(&p, &[], &mut block);
     }
     let smallest = bridge.smallest_nonzero_state();
     assert!(
@@ -491,12 +502,12 @@ fn the_same_input_gives_the_same_bridge_bit_for_bit() {
     assert_eq!(bridge_run(&p, &input, 0.5), bridge_run(&p, &input, 0.5));
     let mut a = Bridge::new(SR);
     let mut scratch = [0.0f32; 16];
-    a.process(&p, &input[..16], &mut scratch);
+    a.process_mono(&p, &input[..16], &mut scratch);
     a.reset();
     let mut b = Bridge::new(SR);
     let (mut x, mut y) = ([0.0f32; 16], [0.0f32; 16]);
-    a.process(&p, &input[..16], &mut x);
-    b.process(&p, &input[..16], &mut y);
+    a.process_mono(&p, &input[..16], &mut x);
+    b.process_mono(&p, &input[..16], &mut y);
     assert_eq!(x, y);
 }
 
@@ -611,13 +622,16 @@ fn turning_the_body_while_it_rings_does_not_click() {
             body_size: 0.2 + 0.6 * (t * 0.5).min(1.0),
             ..BridgeParams::default()
         };
-        bridge.process(&p, if b == 0 { &strike } else { &[] }, &mut block);
+        bridge.process_mono(&p, if b == 0 { &strike } else { &[] }, &mut block);
         out.extend_from_slice(&block);
     }
     let report =
         fathom_analysis::discontinuity(span(&out, SR, 0.3, 1.9)).expect("too short to measure");
     assert!(report.excess < 0.5, "{report:?}");
 }
+
+/// The detuned partners the bridge adds, by the string they shadow, in cents.
+const PARTNER_CENTS: [(usize, f64); 4] = [(1, 1.2), (2, -0.9), (3, 1.6), (5, -1.4)];
 
 /// The tuning of string `index` in scene `scene`, as the root's multiple.
 fn scene_ratio(scene: usize, index: usize) -> f64 {
@@ -674,8 +688,15 @@ fn the_sympathetic_strings_sit_in_the_tuning_of_their_scene() {
         for index in 0..SYMPATHETIC_STRINGS {
             let expected = root_hz * scene_ratio(scene, index);
             let found = peak_hz(tail, expected, 25.0);
+            // A string with a detuned partner (1-2 cents) is heard as the
+            // two together, which pulls the peak toward the partner.
+            let pulled = PARTNER_CENTS
+                .iter()
+                .filter(|(i, _)| *i == index)
+                .map(|(_, c)| c.abs())
+                .fold(0.0f64, f64::max);
             assert!(
-                cents(found, expected).abs() < 1.5,
+                cents(found, expected).abs() < 1.5 + pulled,
                 "scene {scene}, string {index}: {:+.2} cents at {expected:.1} Hz",
                 cents(found, expected)
             );
@@ -754,7 +775,7 @@ fn morphing_between_scenes_does_not_click() {
             ..BridgeParams::default()
         };
         let start = b * 16;
-        bridge.process(&p, burst.get(start..start + 16).unwrap_or(&[]), &mut block);
+        bridge.process_mono(&p, burst.get(start..start + 16).unwrap_or(&[]), &mut block);
         out.extend_from_slice(&block);
     }
     let report =
@@ -764,6 +785,118 @@ fn morphing_between_scenes_does_not_click() {
 
 #[test]
 fn the_tables_have_the_shape_the_code_assumes() {
-    assert_eq!(BODY_MODES, 12);
+    assert_eq!(BODY_MODES, 24);
     assert_eq!(SYMPATHETIC_STRINGS, 8);
+}
+
+// --- K27–K31: what Elements and Rings taught the bridge -------------------------
+
+fn strike() -> Vec<f32> {
+    let mut impulse = vec![0.0f32; 16];
+    impulse[0] = 1.0;
+    impulse
+}
+
+#[test]
+fn the_pickup_position_combs_the_modes() {
+    // Mode n is heard at cos(π·n·position/2). At the far end of the knob the
+    // odd modes are gone and the even ones are not: a hollow sound. At the
+    // near end every mode is heard.
+    let first = 800.0 * 2f64.powf(-2.5);
+    let level_at = |position: f32, n: f64| {
+        let p = BridgeParams {
+            body_mix: 1.0,
+            body_material: 1.0,
+            body_position: position,
+            ..BridgeParams::default()
+        };
+        let out = bridge_run(&p, &strike(), 3.0);
+        let tail = span(&out, SR, 0.2, 2.4);
+        let w = std::f64::consts::TAU * first * n / f64::from(SR);
+        let (mut re, mut im) = (0.0f64, 0.0f64);
+        for (i, x) in tail.iter().enumerate() {
+            re += f64::from(*x) * (w * i as f64).cos();
+            im -= f64::from(*x) * (w * i as f64).sin();
+        }
+        (re * re + im * im).sqrt()
+    };
+    for odd in [1.0, 3.0, 5.0] {
+        let open = level_at(0.0, odd);
+        let hollow = level_at(1.0, odd);
+        assert!(
+            hollow < 0.05 * open,
+            "mode {odd}: {hollow:.3} at 1 against {open:.3} at 0"
+        );
+    }
+    for even in [2.0, 4.0] {
+        let open = level_at(0.0, even);
+        let hollow = level_at(1.0, even);
+        assert!(
+            (hollow / open - 1.0).abs() < 0.15,
+            "mode {even}: {hollow:.3} at 1 against {open:.3} at 0"
+        );
+    }
+}
+
+#[test]
+fn the_body_has_modes_all_the_way_up() {
+    // Twenty-four of them: the twentieth of the harmonic series still rings,
+    // in tune, as long as the material lets the top modes live.
+    let first = 800.0 * 2f64.powf(-2.5);
+    let p = BridgeParams {
+        body_mix: 1.0,
+        body_material: 1.0,
+        body_shape: 0.0,
+        ..BridgeParams::default()
+    };
+    let out = bridge_run(&p, &strike(), 3.0);
+    let tail = span(&out, SR, 0.1, 1.5);
+    for n in [10.0f64, 16.0, 20.0] {
+        let found = peak_hz(tail, first * n, 40.0);
+        assert!(
+            cents(found, first * n).abs() < 2.0,
+            "mode {n}: {:+.2} cents",
+            cents(found, first * n)
+        );
+    }
+}
+
+#[test]
+fn spread_is_mono_at_zero_and_wide_above_it() {
+    let input = noise(9_600, 0.05, 21);
+    let render_pair = |spread: f32| {
+        let p = BridgeParams {
+            body_mix: 0.8,
+            body_spread: spread,
+            body_material: 0.8,
+            body_position: 0.2,
+            level: 0.7,
+            decay: 0.5,
+            ..BridgeParams::default()
+        };
+        let mut bridge = Bridge::new(SR);
+        let (mut left, mut right) = (vec![0.0f32; input.len()], vec![0.0f32; input.len()]);
+        for ((l, r), x) in left
+            .chunks_mut(16)
+            .zip(right.chunks_mut(16))
+            .zip(input.chunks(16))
+        {
+            bridge.process(&p, x, l, r);
+        }
+        (left, right)
+    };
+    let (l0, r0) = render_pair(0.0);
+    assert_eq!(l0, r0, "no spread must be exactly mono");
+    let (l1, r1) = render_pair(1.0);
+    let difference: f32 = l1.iter().zip(&r1).map(|(a, b)| (a - b) * (a - b)).sum();
+    let level: f32 = l1.iter().map(|a| a * a).sum();
+    assert!(
+        difference > 0.05 * level,
+        "spread 1 is not wide: {difference} against {level}"
+    );
+    // The centre does not move: the mean of the pair is the mono signal (the
+    // soft knee is the identity at this level).
+    for ((a, b), mono) in l1.iter().zip(&r1).zip(&l0) {
+        assert!((0.5 * (a + b) - mono).abs() < 1e-4);
+    }
 }

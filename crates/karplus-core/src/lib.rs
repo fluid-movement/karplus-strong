@@ -37,7 +37,8 @@ mod ramp;
 mod voice;
 
 pub use bridge::{
-    Bridge, BridgeParams, BODY_MODES, SCENES, SHAPES, SYMPATHETIC_LEN, SYMPATHETIC_STRINGS,
+    Bridge, BridgeParams, BODY_MODES, SCENES, SHAPES, SYMPATHETIC_LEN, SYMPATHETIC_LINES,
+    SYMPATHETIC_PARTNERS, SYMPATHETIC_STRINGS,
 };
 pub use delay::{DelayLine, MIN_DELAY};
 pub use filter::{

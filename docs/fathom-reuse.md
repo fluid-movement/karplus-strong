@@ -168,3 +168,7 @@ user. Based on it:
 
 What this experiment did not test: `fathom-ui` (no screen here), the Daisy
 target, the instruction budgets, and Fathom's oversampling.
+
+## Not in Fathom, added here (bridge)
+
+- **A state-variable filter.** Fathom has a one-pole and a DC blocker and no SVF. The body's modes (K28) use a topology-preserving band-pass written in `bridge.rs`. If Fathom wants one, this is a candidate, with tests for stability under coefficient modulation.

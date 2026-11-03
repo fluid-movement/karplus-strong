@@ -62,19 +62,21 @@ strings and heard on its own jack:
 
 ```
 voices ─► sum ─┬──────────────────────────────► × (1 − mix) ──┐
-               ├─► body: 12 modes, SHAPE/SIZE/MATERIAL ─► × mix ─► (+) ─► soft knee ─► BRIDGE
-               └─► sympathetic: 8 lines, SCENE/ROOT/RING ──────────────┘
+               ├─► body: 24 modes, SHAPE/SIZE/MATERIAL/POSITION ─► × mix ─► (+) ─► soft knee ─► BRIDGE L, R
+               └─► sympathetic: 12 lines, SCENE/ROOT/RING ──────────────┘
 ```
 
 | Control | Law | Default |
 | --- | --- | --- |
 | STIFF | DC delay of each of two allpass stages: `1 + k²·(top − 1)` samples, `top` = min(24, 20% of the period) | 0 |
 | TENSION | delay shortened by `k × 12% × period × min(1, energy/0.03)`, energy = mean square over 3 periods | 0 |
-| BUZZ | positive swings squeezed against a knee of 0.12; crossfade by `k` | 0 |
+| BUZZ | string length bent by `k² × 1%` of the touch beyond a dead zone of 0.025 (lossless, K21/K27) | 0 |
 | TRIM | ±½ semitone on the loop's delay, centre none (knob `0.5`) | 0.5 |
-| SHAPE | log-frequency morph: string, bar, drum, plate | 0 |
+| SHAPE | log-frequency morph: string, bar, drum, plate (24 modes) | 0 |
 | SIZE | fixed: first mode `800 Hz · 2^(−5k)`; tracked: `note · 2^(2 − 4k)` | 0.5 |
 | MATERIAL | first mode T60 `0.03 s · 2^(7k)`, higher modes die as ratio^−(1 − 0.8k) | 0.5 |
+| POSITION | pickup at `cos(π·n·k/2)` on mode n: all modes at 0, odd gone at 1 | 0 |
+| SPREAD | width of the second, drifting pickup; L and R equal at 0 | 0 |
 | MIX | `dry·(1 − k) + body·k` | 0 |
 | SCENE | six tunings, morph with a 20% flat around each | 0 |
 | ROOT | ±2 octaves around the followed note or a fixed C3 | 0.5 |
@@ -117,8 +119,10 @@ All in `crates/karplus-core/src/params.rs`. A knob is `0..1`.
   the wave and keeps tuning, sustain and DC.
 - The bridge is finite and inside full scale at all 1024 corners with sixteen
   full-scale voices, a wire at its defaults, and free of subnormals after 90 s.
-- Every body mode and every sympathetic string of every scene is within a
+- Every body mode (to the twentieth) and every sympathetic string of every scene is within a
   cent or two of its table; the tracked body moves with the note, the fixed
   one does not; turning SHAPE, SIZE or SCENE while ringing does not click.
+- The pickup position removes the odd modes and leaves the even ones; spread
+  is exactly mono at zero and wide above it, with the same centre.
 - An outboard loop that does nothing is in tune; one that is dark goes flat
   and TRIM brings it back; an unpatched RETURN is ignored bit for bit.

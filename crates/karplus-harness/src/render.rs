@@ -288,7 +288,7 @@ pub fn render_chain(
             .enumerate()
         {
             let t = (b * block_size) as f64 / f64::from(sample_rate);
-            bridge.process(&bridge_at(t), input, block);
+            bridge.process_mono(&bridge_at(t), input, block);
         }
     }
     out

@@ -166,6 +166,14 @@ typedef struct {
    */
   float body_material;
   /**
+   * Body pickup position knob.
+   */
+  float body_position;
+  /**
+   * Stereo width knob.
+   */
+  float body_spread;
+  /**
    * Dry against body.
    */
   float body_mix;
@@ -312,25 +320,31 @@ void karplus_bridge_free(KarplusBridge *bridge);
 void karplus_bridge_reset(KarplusBridge *bridge);
 
 /**
- * Sum `channels` voices and run them through the bridge.
+ * Sum `channels` voices, add what is patched into the body, and run it all
+ * through the bridge.
  *
  * `voices` points to `channels` consecutive blocks of `stride` samples, of
  * which the first `count` of each are used: the layout of a C array
- * `float v[channels][stride]`. Null reads as silence. `out` receives `count`
- * samples.
+ * `float v[channels][stride]`. `external` is `count` samples of audio sent
+ * straight into the body and the sympathetic strings. Either may be null,
+ * which reads as silence. `left` and `right` each receive `count` samples;
+ * `right` may be null.
  *
  * # Safety
  *
- * `bridge` and `params` must be null or valid. `out` must be null or point to
- * `count` writable `f32`s. `voices` must be null or point to
- * `channels * stride` readable `f32`s, with `count <= stride`.
+ * `bridge` and `params` must be null or valid. `left` must be null or point
+ * to `count` writable `f32`s, and so must `right`. `voices` must be null or
+ * point to `channels * stride` readable `f32`s, with `count <= stride`;
+ * `external` must be null or point to `count` readable `f32`s.
  */
 void karplus_bridge_process(KarplusBridge *bridge,
                             const KarplusBridgeParams *params,
                             const float *voices,
                             size_t channels,
                             size_t stride,
-                            float *out,
+                            const float *external,
+                            float *left,
+                            float *right,
                             size_t count);
 
 #ifdef __cplusplus

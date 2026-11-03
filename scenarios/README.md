@@ -54,7 +54,7 @@ Parameters: `pitch_volts`, `decay`, `brightness`, `pick`, `tone`, `length`,
 `drive`, `damp`, `humanize`, `key_track`, `velocity_brightness`,
 `velocity_decay`, `velocity_length`; the loop stages `stiffness`, `tension`,
 `buzz`, `loop_trim` (0.5 is centre); and the bridge: `body_shape`,
-`body_size`, `body_material`, `body_mix`, `body_track` (0 or 1), `sym_scene`,
+`body_size`, `body_material`, `body_position`, `body_spread`, `body_mix`, `body_track` (0 or 1), `sym_scene`,
 `sym_root`, `sym_level`, `sym_decay`, `sym_follow` (0 or 1). Setting any
 `body_*` or `sym_*` runs the render through the bridge, and the measured
 signal is then the BRIDGE output. Set `pitch` or `pitch_volts`, not both.

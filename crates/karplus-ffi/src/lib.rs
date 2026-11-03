@@ -329,6 +329,10 @@ pub struct KarplusBridgeParams {
     pub body_size: f32,
     /// Body material knob.
     pub body_material: f32,
+    /// Body pickup position knob.
+    pub body_position: f32,
+    /// Stereo width knob.
+    pub body_spread: f32,
     /// Dry against body.
     pub body_mix: f32,
     /// Non-zero if the body follows the played note.
@@ -352,6 +356,8 @@ impl From<&KarplusBridgeParams> for BridgeParams {
             body_shape: p.body_shape,
             body_size: p.body_size,
             body_material: p.body_material,
+            body_position: p.body_position,
+            body_spread: p.body_spread,
             body_mix: p.body_mix,
             body_track: p.body_track != 0,
             scene: p.scene,
@@ -370,6 +376,8 @@ impl From<&BridgeParams> for KarplusBridgeParams {
             body_shape: p.body_shape,
             body_size: p.body_size,
             body_material: p.body_material,
+            body_position: p.body_position,
+            body_spread: p.body_spread,
             body_mix: p.body_mix,
             body_track: u8::from(p.body_track),
             scene: p.scene,
@@ -426,18 +434,22 @@ pub unsafe extern "C" fn karplus_bridge_reset(bridge: *mut KarplusBridge) {
     }
 }
 
-/// Sum `channels` voices and run them through the bridge.
+/// Sum `channels` voices, add what is patched into the body, and run it all
+/// through the bridge.
 ///
 /// `voices` points to `channels` consecutive blocks of `stride` samples, of
 /// which the first `count` of each are used: the layout of a C array
-/// `float v[channels][stride]`. Null reads as silence. `out` receives `count`
-/// samples.
+/// `float v[channels][stride]`. `external` is `count` samples of audio sent
+/// straight into the body and the sympathetic strings. Either may be null,
+/// which reads as silence. `left` and `right` each receive `count` samples;
+/// `right` may be null.
 ///
 /// # Safety
 ///
-/// `bridge` and `params` must be null or valid. `out` must be null or point to
-/// `count` writable `f32`s. `voices` must be null or point to
-/// `channels * stride` readable `f32`s, with `count <= stride`.
+/// `bridge` and `params` must be null or valid. `left` must be null or point
+/// to `count` writable `f32`s, and so must `right`. `voices` must be null or
+/// point to `channels * stride` readable `f32`s, with `count <= stride`;
+/// `external` must be null or point to `count` readable `f32`s.
 #[no_mangle]
 pub unsafe extern "C" fn karplus_bridge_process(
     bridge: *mut KarplusBridge,
@@ -445,16 +457,18 @@ pub unsafe extern "C" fn karplus_bridge_process(
     voices: *const f32,
     channels: usize,
     stride: usize,
-    out: *mut f32,
+    external: *const f32,
+    left: *mut f32,
+    right: *mut f32,
     count: usize,
 ) {
     let (Some(bridge), Some(params)) = (bridge.as_mut(), params.as_ref()) else {
         return;
     };
-    if out.is_null() || count == 0 {
+    if left.is_null() || count == 0 {
         return;
     }
-    let out = slice::from_raw_parts_mut(out, count);
+    let left = slice::from_raw_parts_mut(left, count);
     let mut sum = [0.0f32; MAX_BLOCK];
     let count_used = count.min(MAX_BLOCK);
     if !voices.is_null() && stride >= count {
@@ -465,10 +479,23 @@ pub unsafe extern "C" fn karplus_bridge_process(
             }
         }
     }
+    if !external.is_null() {
+        let outside = slice::from_raw_parts(external, count);
+        for (acc, x) in sum.iter_mut().zip(outside.iter().take(count_used)) {
+            *acc += *x;
+        }
+    }
     let input = sum.get(..count_used).unwrap_or(&[]);
-    bridge
-        .bridge
-        .process(&BridgeParams::from(params), input, out);
+    if right.is_null() {
+        bridge
+            .bridge
+            .process_mono(&BridgeParams::from(params), input, left);
+    } else {
+        let right = slice::from_raw_parts_mut(right, count);
+        bridge
+            .bridge
+            .process(&BridgeParams::from(params), input, left, right);
+    }
 }
 
 /// Longest block [`karplus_bridge_process`] sums on its own stack.
@@ -522,6 +549,8 @@ mod tests {
                 core::ptr::null(),
                 4,
                 16,
+                core::ptr::null(),
+                core::ptr::null_mut(),
                 core::ptr::null_mut(),
                 16,
             );
@@ -560,6 +589,8 @@ mod tests {
     fn the_bridge_abi_sums_the_voices_and_plays_the_same_bridge_as_the_core() {
         let bp = BridgeParams {
             body_mix: 0.6,
+            body_spread: 0.7,
+            body_position: 0.3,
             level: 0.8,
             ..BridgeParams::default()
         };
@@ -578,7 +609,8 @@ mod tests {
         }
         let handle = karplus_bridge_new(48_000.0);
         let mut bridge = Bridge::new(48_000.0);
-        let (mut through_abi, mut direct) = ([0.0f32; 16], [0.0f32; 16]);
+        let (mut through_abi, mut through_right) = ([0.0f32; 16], [0.0f32; 16]);
+        let (mut direct, mut direct_right) = ([0.0f32; 16], [0.0f32; 16]);
         for _ in 0..20 {
             // SAFETY: a live handle and a 3 x 16 array of f32s.
             unsafe {
@@ -588,12 +620,15 @@ mod tests {
                     voices.as_ptr().cast(),
                     3,
                     16,
+                    core::ptr::null(),
                     through_abi.as_mut_ptr(),
+                    through_right.as_mut_ptr(),
                     16,
                 );
             }
-            bridge.process(&bp, &sum, &mut direct);
+            bridge.process(&bp, &sum, &mut direct, &mut direct_right);
             assert_eq!(through_abi, direct);
+            assert_eq!(through_right, direct_right);
         }
         // SAFETY: from karplus_bridge_new, freed once.
         unsafe { karplus_bridge_free(handle) };
